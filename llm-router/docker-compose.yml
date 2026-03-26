@@ -1,0 +1,53 @@
+# Pi Agent Builder - Unified Docker Service
+# Combines: LLM Router Web UI, Pi Agent Core, Agent Builder Tools
+
+services:
+  pi-agent-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu
+    container_name: pi-agent-builder
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Provider API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      # Configuration
+      - CONFIG_PATH=/app/data/config.yaml
+      - AGENTS_OUTPUT_DIR=/app/agents/output
+      - NODE_PATH=/usr/lib/node_modules
+    volumes:
+      # Configuration persistence
+      - ./config.yaml:/app/data/config.yaml
+      # Agent output directory
+      - ./agents:/app/agents
+      # Development hot-reload (optional, remove in production)
+      - ./llm_router:/app/llm_router:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Redis for caching (future use)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: pi-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   restart: unless-stopped
+
+# volumes:
+#   redis-data:

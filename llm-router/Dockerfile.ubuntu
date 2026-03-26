@@ -1,0 +1,77 @@
+# Pi Agent Builder - Ubuntu-based Multi-Runtime Docker Image
+# Combines: LLM Router Web UI, Pi Agent Core, Agent Builder Tools
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    gnupg \
+    ca-certificates \
+    build-essential \
+    software-properties-common \
+    zip \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python 3.11
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3.11-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/* && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Install Node.js 20.x
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify installations
+RUN python3 --version && node --version && npm --version
+
+# Install pi-coding-agent globally (if available)
+RUN npm install -g @anthropic/picocolors 2>/dev/null || echo "pi-coding-agent not yet published"
+
+# Copy Python requirements and install
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY llm_router/ ./llm_router/
+COPY config.yaml.example ./config.yaml.example
+
+# Create directory for config and copy example as default
+RUN mkdir -p /app/data /app/agents && \
+    cp ./config.yaml.example ./data/config.yaml
+
+# Create agents output directory
+RUN mkdir -p /app/agents/output
+
+# Expose port
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV CONFIG_PATH=/app/data/config.yaml
+ENV AGENTS_OUTPUT_DIR=/app/agents/output
+ENV NODE_PATH=/usr/lib/node_modules
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run the API server
+CMD ["python3", "-m", "llm_router.server.api", "/app/data/config.yaml"]

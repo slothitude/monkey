@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Router</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #252525;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --accent: #7c3aed;
+            --accent-hover: #8b5cf6;
+            --success: #22c55e;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --border: #333;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        h1 span {
+            color: var(--accent);
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error);
+        }
+
+        .status-dot.healthy {
+            background: var(--success);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: var(--bg-secondary);
+            padding: 4px;
+            border-radius: 8px;
+            width: fit-content;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .card h2 {
+            font-size: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card h2 .icon {
+            font-size: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+        }
+
+        select {
+            cursor: pointer;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .message.user {
+            background: var(--accent);
+            margin-left: 40px;
+        }
+
+        .message.assistant {
+            background: var(--bg-secondary);
+            margin-right: 40px;
+        }
+
+        .message .role {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .message .content {
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input input {
+            flex: 1;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: var(--bg-tertiary);
+            padding: 16px;
+            border-radius: 8px;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .stat-card .change {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .stat-card .change.positive {
+            color: var(--success);
+        }
+
+        .stat-card .change.negative {
+            color: var(--error);
+        }
+
+        .provider-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .provider-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .provider-item .name {
+            font-weight: 500;
+        }
+
+        .provider-item .status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .provider-item .status.online {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+
+        .provider-item .status.offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--error);
+        }
+
+        .parallel-config {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .model-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .model-tag {
+            background: var(--bg-tertiary);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .model-tag:hover {
+            background: var(--accent);
+        }
+
+        .model-tag.selected {
+            background: var(--accent);
+        }
+
+        .results-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .result-item {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .result-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .result-item .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .result-item .model-name {
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        .result-item .latency {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .result-item .response {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .config-editor {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            min-height: 300px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            border-color: var(--success);
+        }
+
+        .toast.error {
+            border-color: var(--error);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>LLM <span>Router</span></h1>
+            <div class="status-badge">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Checking...</span>
+            </div>
+        </header>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="chat">Chat</button>
+            <button class="tab" data-tab="parallel">Parallel</button>
+            <button class="tab" data-tab="agent-builder">Agent Builder</button>
+            <button class="tab" data-tab="providers">Providers</button>
+            <button class="tab" data-tab="stats">Stats</button>
+            <button class="tab" data-tab="config">Config</button>
+        </div>
+
+        <!-- Agent Builder Tab -->
+        <div class="tab-content" id="agent-builder-tab">
+            <div class="grid">
+                <div class="card">
+                    <h2><span class="icon">🤖</span> Build Agent Component</h2>
+                    <div class="form-group">
+                        <label>Component Type</label>
+                        <select id="agentComponentType" onchange="onComponentTypeChange()">
+                            <option value="skill">Skill (SKILL.md)</option>
+                            <option value="extension">Extension (.ts)</option>
+                            <option value="prompt">Prompt (.md)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Name (kebab-case)</label>
+                        <input type="text" id="agentName" placeholder="e.g., code-reviewer">
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="agentDescription" placeholder="Describe what this component should do..."></textarea>
+                    </div>
+
+                    <!-- Skill-specific options -->
+                    <div id="skillOptions">
+                        <div class="form-group">
+                            <label>Category</label>
+                            <select id="skillCategory">
+                                <option value="automation">Automation</option>
+                                <option value="code">Code</option>
+                                <option value="research">Research</option>
+                                <option value="writing">Writing</option>
+                                <option value="data">Data</option>
+                                <option value="analysis">Analysis</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Custom Instructions (optional)</label>
+                            <textarea id="skillInstructions" placeholder="Additional behavior instructions..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="includeExamples" checked> Include Usage Examples
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Extension-specific options -->
+                    <div id="extensionOptions" style="display: none;">
+                        <div class="form-group">
+                            <label>Extension Type</label>
+                            <select id="extensionType">
+                                <option value="tool">Tool</option>
+                                <option value="resource">Resource</option>
+                                <option value="prompt">Prompt</option>
+                                <option value="hook">Hook</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Dependencies (comma-separated)</label>
+                            <input type="text" id="extensionDeps" placeholder="zod, @anthropic-ai/sdk">
+                        </div>
+                    </div>
+
+                    <!-- Prompt-specific options -->
+                    <div id="promptOptions" style="display: none;">
+                        <div class="form-group">
+                            <label>Style</label>
+                            <select id="promptStyle">
+                                <option value="instructional">Instructional</option>
+                                <option value="conversational">Conversational</option>
+                                <option value="structured">Structured</option>
+                                <option value="role_based">Role-Based</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Role Definition (optional)</label>
+                            <input type="text" id="promptRole" placeholder="You are an expert...">
+                        </div>
+                        <div class="form-group">
+                            <label>Capabilities (one per line)</label>
+                            <textarea id="promptCapabilities" placeholder="Writing clean code&#10;Debugging issues&#10;Explaining concepts"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Guidelines (one per line)</label>
+                            <textarea id="promptGuidelines" placeholder="Always consider edge cases&#10;Include error handling"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="generateAgentComponent()" id="generateBtn">Generate</button>
+                        <button class="btn btn-secondary" onclick="loadTemplates()">Load Template</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2><span class="icon">📄</span> Preview</h2>
+                    <div class="form-group">
+                        <label>Generated Code</label>
+                        <textarea class="config-editor" id="agentPreview" style="min-height: 400px;" readonly placeholder="Generated code will appear here..."></textarea>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="downloadComponent()">Download</button>
+                        <button class="btn btn-secondary" onclick="copyToClipboard()">Copy to Clipboard</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Templates Section -->
+            <div class="card" id="templatesCard" style="margin-top: 20px; display: none;">
+                <h2><span class="icon">📚</span> Templates</h2>
+                <div id="templatesList" class="stats-grid">
+                    <p style="color: var(--text-secondary);">Loading templates...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Tab -->
+        <div class="tab-content active" id="chat-tab">
+            <div class="grid">
+                <div class="card">
+                    <h2><span class="icon">💬</span> Chat</h2>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select id="chatModel">
+                            <option value="">Select a model...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>System Prompt (optional)</label>
+                        <textarea id="systemPrompt" placeholder="You are a helpful assistant..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                        <span id="tempValue">0.7</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens</label>
+                        <input type="number" id="maxTokens" value="1000" min="1" max="32000">
+                    </div>
+                    <div class="form-group">
+                        <label>Stream Response</label>
+                        <input type="checkbox" id="streamMode" checked>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2><span class="icon">💭</span> Response</h2>
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="message assistant">
+                                <div class="role">Assistant</div>
+                                <div class="content">Hello! I'm ready to help. Select a model and start chatting.</div>
+                            </div>
+                        </div>
+                        <div class="chat-input">
+                            <input type="text" id="userInput" placeholder="Type your message..." onkeypress="if(event.key==='Enter')sendMessage()">
+                            <button class="btn btn-primary" onclick="sendMessage()" id="sendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Parallel Tab -->
+        <div class="tab-content" id="parallel-tab">
+            <div class="card">
+                <h2><span class="icon">⚡</span> Parallel Execution</h2>
+                <div class="parallel-config">
+                    <div class="form-group">
+                        <label>Mode</label>
+                        <select id="parallelMode">
+                            <option value="broadcast">Broadcast (same prompt, multiple models)</option>
+                            <option value="race">Race (first response wins)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Concurrent</label>
+                        <input type="number" id="maxConcurrent" value="5" min="1" max="20">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Select Models</label>
+                    <div class="model-tags" id="parallelModels"></div>
+                </div>
+                <div class="form-group">
+                    <label>Prompt</label>
+                    <textarea id="parallelPrompt" placeholder="Enter prompt to broadcast to all selected models..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>System Prompt (optional)</label>
+                    <textarea id="parallelSystem" placeholder="You are a helpful assistant..."></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="runParallel()" id="runParallelBtn">Run Parallel</button>
+                </div>
+                <div class="results-panel" id="parallelResults" style="display: none;">
+                    <h3 style="margin-bottom: 12px;">Results</h3>
+                    <div id="resultsList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Providers Tab -->
+        <div class="tab-content" id="providers-tab">
+            <div class="card">
+                <h2><span class="icon">🔌</span> Providers</h2>
+                <div class="provider-list" id="providerList">
+                    <p style="color: var(--text-secondary);">Loading providers...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div class="tab-content" id="stats-tab">
+            <div class="card">
+                <h2><span class="icon">📊</span> Statistics</h2>
+                <div class="stats-grid" id="statsGrid">
+                    <p style="color: var(--text-secondary);">Loading statistics...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Tab -->
+        <div class="tab-content" id="config-tab">
+            <div class="grid">
+                <div class="card">
+                    <h2><span class="icon">➕</span> Add Provider</h2>
+                    <div class="form-group">
+                        <label>Provider Type</label>
+                        <select id="providerType" onchange="onProviderTypeChange()">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="custom">Custom (OpenAI-compatible)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Provider ID (unique identifier)</label>
+                        <input type="text" id="providerId" placeholder="e.g., openai, anthropic, my-provider">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="providerApiKey" placeholder="sk-...">
+                    </div>
+                    <div class="form-group" id="baseUrlGroup" style="display: none;">
+                        <label>Base URL</label>
+                        <input type="text" id="providerBaseUrl" placeholder="https://api.example.com/v1">
+                    </div>
+                    <div class="form-group">
+                        <label>Models (comma-separated, use * for wildcard)</label>
+                        <input type="text" id="providerModels" placeholder="gpt-4, gpt-3.5-turbo, gpt-*">
+                    </div>
+                    <div class="form-group">
+                        <label>Priority (lower = higher priority)</label>
+                        <input type="number" id="providerPriority" value="1" min="1" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="providerEnabled" checked> Enabled
+                        </label>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="addProvider()">Add Provider</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2><span class="icon">📋</span> Configured Providers</h2>
+                    <div id="configuredProviders" class="provider-list">
+                        <p style="color: var(--text-secondary);">Loading...</p>
+                    </div>
+                    <div class="btn-group" style="margin-top: 20px;">
+                        <button class="btn btn-primary" onclick="saveConfigFromForm()">Save Configuration</button>
+                        <button class="btn btn-secondary" onclick="toggleYamlEditor()">Edit YAML</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card" id="yamlEditorCard" style="margin-top: 20px; display: none;">
+                <h2><span class="icon">📝</span> YAML Editor (Advanced)</h2>
+                <div class="form-group">
+                    <label>config.yaml</label>
+                    <textarea class="config-editor" id="configEditor"></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveConfig()">Save YAML</button>
+                    <button class="btn btn-secondary" onclick="loadConfig()">Reload YAML</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const API_BASE = '';
+        let models = [];
+        let selectedParallelModels = [];
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + '-tab').classList.add('active');
+            });
+        });
+
+        // Temperature slider
+        document.getElementById('temperature').addEventListener('input', (e) => {
+            document.getElementById('tempValue').textContent = e.target.value;
+        });
+
+        // Toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast show ${type}`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Check health
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                const data = await res.json();
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+
+                if (data.status === 'healthy' || data.providers.length > 0) {
+                    dot.classList.add('healthy');
+                    text.textContent = `${data.providers.length} provider(s)`;
+                } else {
+                    dot.classList.remove('healthy');
+                    text.textContent = 'No providers';
+                }
+            } catch (e) {
+                document.getElementById('statusDot').classList.remove('healthy');
+                document.getElementById('statusText').textContent = 'Offline';
+            }
+        }
+
+        // Load models
+        async function loadModels() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/models`);
+                const data = await res.json();
+                models = data.data || [];
+
+                const select = document.getElementById('chatModel');
+                select.innerHTML = '<option value="">Select a model...</option>';
+                models.forEach(m => {
+                    select.innerHTML += `<option value="${m.id}">${m.id} (${m.owned_by})</option>`;
+                });
+
+                // Parallel models
+                const parallelModels = document.getElementById('parallelModels');
+                parallelModels.innerHTML = '';
+                models.forEach(m => {
+                    const tag = document.createElement('div');
+                    tag.className = 'model-tag';
+                    tag.textContent = m.id;
+                    tag.onclick = () => {
+                        tag.classList.toggle('selected');
+                        if (tag.classList.contains('selected')) {
+                            selectedParallelModels.push(m.id);
+                        } else {
+                            selectedParallelModels = selectedParallelModels.filter(id => id !== m.id);
+                        }
+                    };
+                    parallelModels.appendChild(tag);
+                });
+            } catch (e) {
+                console.error('Failed to load models:', e);
+            }
+        }
+
+        // Load providers
+        async function loadProviders() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                const data = await res.json();
+                const list = document.getElementById('providerList');
+
+                if (data.providers && data.providers.length > 0) {
+                    list.innerHTML = data.providers.map(p => `
+                        <div class="provider-item">
+                            <span class="name">${p}</span>
+                            <span class="status online">Online</span>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<p style="color: var(--text-secondary);">No providers configured. Add API keys in config.yaml</p>';
+                }
+            } catch (e) {
+                document.getElementById('providerList').innerHTML = '<p style="color: var(--error);">Failed to load providers</p>';
+            }
+        }
+
+        // Load stats
+        async function loadStats() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/stats`);
+                const data = await res.json();
+                const grid = document.getElementById('statsGrid');
+
+                if (Object.keys(data).length === 0) {
+                    grid.innerHTML = '<p style="color: var(--text-secondary);">No statistics available yet. Make some requests first.</p>';
+                    return;
+                }
+
+                grid.innerHTML = Object.entries(data).map(([provider, stats]) => `
+                    <div class="stat-card">
+                        <div class="label">${provider}</div>
+                        <div class="value">${stats.requests}</div>
+                        <div class="change ${stats.success_rate >= 0.9 ? 'positive' : 'negative'}">
+                            ${Math.round(stats.success_rate * 100)}% success · ${stats.avg_latency}s avg
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('statsGrid').innerHTML = '<p style="color: var(--error);">Failed to load stats</p>';
+            }
+        }
+
+        // Load config
+        async function loadConfig() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/config`);
+                const data = await res.json();
+                document.getElementById('configEditor').value = data.config || '# No config file found';
+            } catch (e) {
+                document.getElementById('configEditor').value = '# Failed to load config';
+            }
+        }
+
+        // Save config
+        async function saveConfig() {
+            try {
+                const config = document.getElementById('configEditor').value;
+                const res = await fetch(`${API_BASE}/v1/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Configuration saved! Restart server to apply changes.');
+                    await loadConfigForm();
+                } else {
+                    showToast('Failed to save config', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to save config', 'error');
+            }
+        }
+
+        // Parsed config for form editing
+        let parsedConfig = null;
+
+        // Provider type change handler
+        function onProviderTypeChange() {
+            const type = document.getElementById('providerType').value;
+            const baseUrlGroup = document.getElementById('baseUrlGroup');
+            const baseUrlInput = document.getElementById('providerBaseUrl');
+            const idInput = document.getElementById('providerId');
+
+            const defaults = {
+                openai: { id: 'openai', url: '' },
+                anthropic: { id: 'anthropic', url: '' },
+                openrouter: { id: 'openrouter', url: 'https://openrouter.ai/api/v1' },
+                custom: { id: '', url: '' }
+            };
+
+            const def = defaults[type] || defaults.custom;
+            idInput.value = def.id;
+            baseUrlInput.value = def.url;
+
+            if (type === 'custom' || type === 'openrouter') {
+                baseUrlGroup.style.display = 'block';
+            } else {
+                baseUrlGroup.style.display = 'none';
+            }
+        }
+
+        // Toggle YAML editor
+        function toggleYamlEditor() {
+            const card = document.getElementById('yamlEditorCard');
+            card.style.display = card.style.display === 'none' ? 'block' : 'none';
+            if (card.style.display === 'block') {
+                loadConfig();
+            }
+        }
+
+        // Load config into form
+        async function loadConfigForm() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/config`);
+                const data = await res.json();
+                const yamlText = data.config || '';
+
+                // Parse YAML manually (simple parser)
+                parsedConfig = parseSimpleYaml(yamlText);
+
+                // Render providers
+                renderConfiguredProviders();
+
+                // Also update YAML editor
+                document.getElementById('configEditor').value = yamlText;
+            } catch (e) {
+                console.error('Failed to load config form:', e);
+            }
+        }
+
+        // Simple YAML parser for config
+        function parseSimpleYaml(yaml) {
+            const config = { providers: {}, default_provider: 'openai', failover_enabled: true, timeout: 60 };
+            const lines = yaml.split('\n');
+            let currentProvider = null;
+            let currentExtra = null;
+            let inExtraHeaders = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmed = line.trim();
+
+                if (trimmed.startsWith('#') || trimmed === '') continue;
+
+                if (line.startsWith('providers:')) continue;
+
+                if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.includes(':') && !trimmed.includes('api_key') && !trimmed.includes('models') && !trimmed.includes('enabled') && !trimmed.includes('priority') && !trimmed.includes('base_url') && !trimmed.includes('extra')) {
+                    currentProvider = trimmed.replace(':', '').trim();
+                    config.providers[currentProvider] = { models: [], enabled: true, priority: 99 };
+                    inExtraHeaders = false;
+                }
+
+                if (currentProvider && trimmed.startsWith('api_key:')) {
+                    config.providers[currentProvider].api_key = trimmed.replace('api_key:', '').trim().replace(/"/g, '');
+                }
+                if (currentProvider && trimmed.startsWith('base_url:')) {
+                    config.providers[currentProvider].base_url = trimmed.replace('base_url:', '').trim().replace(/"/g, '');
+                }
+                if (currentProvider && trimmed.startsWith('enabled:')) {
+                    config.providers[currentProvider].enabled = trimmed.includes('true');
+                }
+                if (currentProvider && trimmed.startsWith('priority:')) {
+                    config.providers[currentProvider].priority = parseInt(trimmed.replace('priority:', '').trim());
+                }
+                if (trimmed.startsWith('- "gpt') || trimmed.startsWith('- "claude') || trimmed.startsWith('- "') || trimmed.startsWith('- openrouter') || trimmed.startsWith('- zai') || trimmed.startsWith('- ') && currentProvider) {
+                    const model = trimmed.replace('- ', '').replace(/"/g, '').trim();
+                    if (model && !model.includes(':')) {
+                        config.providers[currentProvider].models.push(model);
+                    }
+                }
+
+                // Global settings
+                if (trimmed.startsWith('default_provider:')) {
+                    config.default_provider = trimmed.replace('default_provider:', '').trim();
+                }
+                if (trimmed.startsWith('failover_enabled:')) {
+                    config.failover_enabled = trimmed.includes('true');
+                }
+                if (trimmed.startsWith('timeout:')) {
+                    config.timeout = parseInt(trimmed.replace('timeout:', '').trim());
+                }
+            }
+
+            return config;
+        }
+
+        // Render configured providers
+        function renderConfiguredProviders() {
+            const container = document.getElementById('configuredProviders');
+
+            if (!parsedConfig || !parsedConfig.providers || Object.keys(parsedConfig.providers).length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary);">No providers configured. Add one above.</p>';
+                return;
+            }
+
+            let html = '';
+            for (const [id, provider] of Object.entries(parsedConfig.providers)) {
+                const hasKey = provider.api_key && provider.api_key !== '${OPENAI_API_KEY}' &&
+                               provider.api_key !== '${ANTHROPIC_API_KEY}' &&
+                               provider.api_key !== '${OPENROUTER_API_KEY}' &&
+                               provider.api_key !== '${ZAI_API_KEY}';
+                const statusClass = hasKey ? 'online' : 'offline';
+                const statusText = hasKey ? 'Configured' : 'Needs API Key';
+
+                html += `
+                    <div class="provider-item">
+                        <div>
+                            <span class="name">${id}</span>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                ${provider.models.slice(0, 3).join(', ')}${provider.models.length > 3 ? '...' : ''}
+                                ${provider.base_url ? `<br>URL: ${provider.base_url}` : ''}
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="status ${statusClass}">${statusText}</span>
+                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="editProvider('${id}')">Edit</button>
+                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; color: var(--error);" onclick="deleteProvider('${id}')">✕</button>
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        // Add provider
+        function addProvider() {
+            const id = document.getElementById('providerId').value.trim();
+            const apiKey = document.getElementById('providerApiKey').value.trim();
+            const baseUrl = document.getElementById('providerBaseUrl').value.trim();
+            const modelsStr = document.getElementById('providerModels').value.trim();
+            const priority = parseInt(document.getElementById('providerPriority').value) || 1;
+            const enabled = document.getElementById('providerEnabled').checked;
+
+            if (!id) {
+                showToast('Please enter a provider ID', 'error');
+                return;
+            }
+            if (!apiKey) {
+                showToast('Please enter an API key', 'error');
+                return;
+            }
+
+            const models = modelsStr.split(',').map(m => m.trim()).filter(m => m);
+
+            if (!parsedConfig) parsedConfig = { providers: {}, default_provider: 'openai', failover_enabled: true, timeout: 60 };
+
+            parsedConfig.providers[id] = {
+                api_key: apiKey,
+                models: models.length > 0 ? models : ['*'],
+                enabled,
+                priority
+            };
+
+            if (baseUrl) {
+                parsedConfig.providers[id].base_url = baseUrl;
+            }
+
+            renderConfiguredProviders();
+            showToast(`Provider "${id}" added. Click "Save Configuration" to apply.`);
+
+            // Clear form
+            document.getElementById('providerId').value = '';
+            document.getElementById('providerApiKey').value = '';
+            document.getElementById('providerBaseUrl').value = '';
+            document.getElementById('providerModels').value = '';
+            document.getElementById('providerPriority').value = '1';
+        }
+
+        // Edit provider
+        function editProvider(id) {
+            const provider = parsedConfig?.providers?.[id];
+            if (!provider) return;
+
+            document.getElementById('providerId').value = id;
+            document.getElementById('providerApiKey').value = provider.api_key || '';
+            document.getElementById('providerBaseUrl').value = provider.base_url || '';
+            document.getElementById('providerModels').value = (provider.models || []).join(', ');
+            document.getElementById('providerPriority').value = provider.priority || 1;
+            document.getElementById('providerEnabled').checked = provider.enabled !== false;
+
+            // Show base URL field for custom providers
+            const baseUrlGroup = document.getElementById('baseUrlGroup');
+            baseUrlGroup.style.display = provider.base_url ? 'block' : 'none';
+
+            showToast(`Editing "${id}". Make changes and click "Add Provider" to update.`);
+        }
+
+        // Delete provider
+        function deleteProvider(id) {
+            if (!parsedConfig || !parsedConfig.providers[id]) return;
+
+            delete parsedConfig.providers[id];
+            renderConfiguredProviders();
+            showToast(`Provider "${id}" removed. Click "Save Configuration" to apply.`);
+        }
+
+        // Save config from form
+        async function saveConfigFromForm() {
+            if (!parsedConfig) {
+                showToast('No configuration to save', 'error');
+                return;
+            }
+
+            // Build YAML
+            let yaml = '# LLM Router Configuration\n\nproviders:\n';
+
+            for (const [id, provider] of Object.entries(parsedConfig.providers)) {
+                yaml += `  ${id}:\n`;
+                yaml += `    api_key: ${provider.api_key || '""'}\n`;
+                if (provider.base_url) {
+                    yaml += `    base_url: "${provider.base_url}"\n`;
+                }
+                yaml += `    models:\n`;
+                for (const model of (provider.models || [])) {
+                    yaml += `      - "${model}"\n`;
+                }
+                yaml += `    enabled: ${provider.enabled !== false}\n`;
+                yaml += `    priority: ${provider.priority || 1}\n`;
+            }
+
+            yaml += `\n# Global settings\n`;
+            yaml += `default_provider: ${parsedConfig.default_provider || 'openai'}\n`;
+            yaml += `failover_enabled: ${parsedConfig.failover_enabled !== false}\n`;
+            yaml += `timeout: ${parsedConfig.timeout || 60}\n`;
+
+            document.getElementById('configEditor').value = yaml;
+
+            // Save via API
+            await saveConfig();
+        }
+
+        // Send message
+        async function sendMessage() {
+            const model = document.getElementById('chatModel').value;
+            const userInput = document.getElementById('userInput');
+            const message = userInput.value.trim();
+
+            if (!model || !message) return;
+
+            const systemPrompt = document.getElementById('systemPrompt').value;
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const stream = document.getElementById('streamMode').checked;
+
+            const messages = [];
+            if (systemPrompt) {
+                messages.push({ role: 'system', content: systemPrompt });
+            }
+            messages.push({ role: 'user', content: message });
+
+            // Add user message to chat
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML += `
+                <div class="message user">
+                    <div class="role">You</div>
+                    <div class="content">${escapeHtml(message)}</div>
+                </div>
+            `;
+
+            userInput.value = '';
+            document.getElementById('sendBtn').disabled = true;
+
+            // Add assistant message placeholder
+            const assistantDiv = document.createElement('div');
+            assistantDiv.className = 'message assistant';
+            assistantDiv.innerHTML = `
+                <div class="role">Assistant</div>
+                <div class="content"><span class="loading"></span></div>
+            `;
+            chatMessages.appendChild(assistantDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            const contentDiv = assistantDiv.querySelector('.content');
+
+            try {
+                if (stream) {
+                    const response = await fetch(`${API_BASE}/v1/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model,
+                            messages,
+                            temperature,
+                            max_tokens: maxTokens,
+                            stream: true
+                        })
+                    });
+
+                    contentDiv.textContent = '';
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    const delta = data.choices?.[0]?.delta;
+                                    if (delta?.content) {
+                                        contentDiv.textContent += delta.content;
+                                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                } else {
+                    const response = await fetch(`${API_BASE}/v1/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model,
+                            messages,
+                            temperature,
+                            max_tokens: maxTokens,
+                            stream: false
+                        })
+                    });
+
+                    const data = await response.json();
+                    contentDiv.textContent = data.choices?.[0]?.message?.content || 'No response';
+                }
+            } catch (e) {
+                contentDiv.innerHTML = `<span style="color: var(--error);">Error: ${e.message}</span>`;
+            }
+
+            document.getElementById('sendBtn').disabled = false;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            loadStats();
+        }
+
+        // Run parallel
+        async function runParallel() {
+            const mode = document.getElementById('parallelMode').value;
+            const prompt = document.getElementById('parallelPrompt').value.trim();
+            const systemPrompt = document.getElementById('parallelSystem').value;
+
+            if (!prompt || selectedParallelModels.length === 0) {
+                showToast('Please enter a prompt and select at least one model', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('runParallelBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Running...';
+
+            const resultsPanel = document.getElementById('parallelResults');
+            const resultsList = document.getElementById('resultsList');
+            resultsPanel.style.display = 'block';
+            resultsList.innerHTML = '<p style="color: var(--text-secondary);">Executing...</p>';
+
+            try {
+                const res = await fetch(`${API_BASE}/v1/parallel`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mode,
+                        prompt,
+                        system_prompt: systemPrompt,
+                        models: selectedParallelModels,
+                        max_concurrent: parseInt(document.getElementById('maxConcurrent').value)
+                    })
+                });
+
+                const data = await res.json();
+                resultsList.innerHTML = '';
+
+                data.results.forEach(result => {
+                    const div = document.createElement('div');
+                    div.className = 'result-item';
+
+                    if (result.success) {
+                        div.innerHTML = `
+                            <div class="header">
+                                <span class="model-name">${result.model}</span>
+                                <span class="latency">${result.latency?.toFixed(2)}s</span>
+                            </div>
+                            <div class="response">${escapeHtml(result.content || '')}</div>
+                        `;
+                    } else {
+                        div.innerHTML = `
+                            <div class="header">
+                                <span class="model-name">${result.model}</span>
+                                <span class="latency" style="color: var(--error);">Failed</span>
+                            </div>
+                            <div class="response" style="color: var(--error);">${escapeHtml(result.error || 'Unknown error')}</div>
+                        `;
+                    }
+
+                    resultsList.appendChild(div);
+                });
+
+                loadStats();
+            } catch (e) {
+                resultsList.innerHTML = `<p style="color: var(--error);">Error: ${e.message}</p>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Run Parallel';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Agent Builder functions
+        let currentTemplates = { skills: [], extensions: [], prompts: [] };
+        let generatedContent = '';
+
+        function onComponentTypeChange() {
+            const type = document.getElementById('agentComponentType').value;
+            document.getElementById('skillOptions').style.display = type === 'skill' ? 'block' : 'none';
+            document.getElementById('extensionOptions').style.display = type === 'extension' ? 'block' : 'none';
+            document.getElementById('promptOptions').style.display = type === 'prompt' ? 'block' : 'none';
+        }
+
+        async function generateAgentComponent() {
+            const type = document.getElementById('agentComponentType').value;
+            const name = document.getElementById('agentName').value.trim();
+            const description = document.getElementById('agentDescription').value.trim();
+
+            if (!name || !description) {
+                showToast('Please fill in name and description', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Generating...';
+
+            try {
+                let endpoint, body;
+
+                if (type === 'skill') {
+                    endpoint = '/v1/agent/skill';
+                    body = {
+                        name,
+                        description,
+                        category: document.getElementById('skillCategory').value,
+                        custom_instructions: document.getElementById('skillInstructions').value || null,
+                        include_examples: document.getElementById('includeExamples').checked,
+                    };
+                } else if (type === 'extension') {
+                    endpoint = '/v1/agent/extension';
+                    const deps = document.getElementById('extensionDeps').value
+                        .split(',')
+                        .map(d => d.trim())
+                        .filter(d => d);
+                    body = {
+                        name,
+                        description,
+                        extension_type: document.getElementById('extensionType').value,
+                        dependencies: deps.length > 0 ? deps : null,
+                    };
+                } else {
+                    endpoint = '/v1/agent/prompt';
+                    const capabilities = document.getElementById('promptCapabilities').value
+                        .split('\n')
+                        .map(c => c.trim())
+                        .filter(c => c);
+                    const guidelines = document.getElementById('promptGuidelines').value
+                        .split('\n')
+                        .map(g => g.trim())
+                        .filter(g => g);
+                    body = {
+                        name,
+                        description,
+                        style: document.getElementById('promptStyle').value,
+                        role: document.getElementById('promptRole').value || null,
+                        capabilities: capabilities.length > 0 ? capabilities : null,
+                        guidelines: guidelines.length > 0 ? guidelines : null,
+                    };
+                }
+
+                const res = await fetch(`${API_BASE}${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    let content;
+                    if (type === 'skill') {
+                        content = data.skill.content;
+                        generatedContent = content;
+                    } else if (type === 'extension') {
+                        content = data.extension.code;
+                        generatedContent = content;
+                    } else {
+                        content = data.prompt.content;
+                        generatedContent = content;
+                    }
+                    document.getElementById('agentPreview').value = content;
+                    showToast('Component generated successfully!');
+                } else {
+                    showToast('Generation failed', 'error');
+                }
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Generate';
+        }
+
+        async function loadTemplates() {
+            const card = document.getElementById('templatesCard');
+            const list = document.getElementById('templatesList');
+            card.style.display = 'block';
+            list.innerHTML = '<p style="color: var(--text-secondary);">Loading templates...</p>';
+
+            try {
+                const res = await fetch(`${API_BASE}/v1/agent/templates`);
+                currentTemplates = await res.json();
+
+                const type = document.getElementById('agentComponentType').value;
+                const templates = type === 'skill' ? currentTemplates.skills :
+                                 type === 'extension' ? currentTemplates.extensions :
+                                 currentTemplates.prompts;
+
+                if (templates.length === 0) {
+                    list.innerHTML = '<p style="color: var(--text-secondary);">No templates available</p>';
+                    return;
+                }
+
+                list.innerHTML = templates.map(t => `
+                    <div class="stat-card" style="cursor: pointer;" onclick="useTemplate('${t.id}')">
+                        <div class="label">${t.name}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">
+                            ${t.preview.substring(0, 100)}...
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                list.innerHTML = `<p style="color: var(--error);">Error loading templates: ${e.message}</p>`;
+            }
+        }
+
+        async function useTemplate(id) {
+            const type = document.getElementById('agentComponentType').value;
+            try {
+                const res = await fetch(`${API_BASE}/v1/agent/templates/${type}/${id}`);
+                const data = await res.json();
+                if (data.template) {
+                    document.getElementById('agentName').value = id;
+                    document.getElementById('agentPreview').value = data.template;
+                    generatedContent = data.template;
+                    showToast('Template loaded!');
+                }
+            } catch (e) {
+                showToast(`Error loading template: ${e.message}`, 'error');
+            }
+        }
+
+        function downloadComponent() {
+            if (!generatedContent) {
+                showToast('No content to download', 'error');
+                return;
+            }
+
+            const type = document.getElementById('agentComponentType').value;
+            const name = document.getElementById('agentName').value || 'component';
+            let filename, mimeType;
+
+            if (type === 'skill') {
+                filename = `${name.toUpperCase()}.md`;
+                mimeType = 'text/markdown';
+            } else if (type === 'extension') {
+                filename = `${name}.ts`;
+                mimeType = 'text/typescript';
+            } else {
+                filename = `${name}.md`;
+                mimeType = 'text/markdown';
+            }
+
+            const blob = new Blob([generatedContent], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`Downloaded ${filename}`);
+        }
+
+        function copyToClipboard() {
+            const content = document.getElementById('agentPreview').value;
+            if (!content) {
+                showToast('No content to copy', 'error');
+                return;
+            }
+            navigator.clipboard.writeText(content).then(() => {
+                showToast('Copied to clipboard!');
+            }).catch(e => {
+                showToast('Failed to copy', 'error');
+            });
+        }
+
+        // Initialize
+        checkHealth();
+        loadModels();
+        loadProviders();
+        loadStats();
+        loadConfig();
+        loadConfigForm();
+        onProviderTypeChange();
+
+        // Refresh stats every 10 seconds
+        setInterval(() => {
+            loadStats();
+            checkHealth();
+        }, 10000);
+    </script>
+</body>
+</html>

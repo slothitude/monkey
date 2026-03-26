@@ -1,0 +1,50 @@
+# LLM Router Configuration
+# Copy this file to config.yaml and fill in your API keys
+
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    models:
+      - "gpt-4"
+      - "gpt-4-turbo"
+      - "gpt-3.5-turbo"
+      - "gpt-*"  # Wildcard to match any gpt model
+    enabled: true
+    priority: 1  # Lower = higher priority
+
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    models:
+      - "claude-3-opus"
+      - "claude-3-sonnet"
+      - "claude-3-haiku"
+      - "claude-*"
+    enabled: true
+    priority: 2
+
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+    base_url: "https://openrouter.ai/api/v1"
+    models:
+      - "openrouter/auto"
+      - "anthropic/claude-3-opus"
+      - "openai/gpt-4"
+    enabled: true
+    priority: 3
+    extra:
+      headers:
+        HTTP-Referer: "https://your-app.com"
+        X-Title: "LLM Router"
+
+  zai:
+    api_key: ${ZAI_API_KEY}
+    base_url: "https://api.zai.coding/v1"
+    models:
+      - "zai-coding"
+    enabled: true
+    priority: 4
+
+# Global settings
+default_provider: openai
+failover_enabled: true
+timeout: 60
