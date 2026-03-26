@@ -25,6 +25,18 @@ from llm_router.parallel import (
     parallel_map,
 )
 
+# MCP Worker Pool - for Claude Code delegation
+from llm_router.mcp_worker import (
+    delegate_task,
+    analyze_task,
+    spawn_worker,
+    execute_skill,
+    list_workers,
+    list_skills,
+    initialize_worker_pool,
+    get_mcp_tools,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -49,4 +61,13 @@ __all__ = [
     "parallel_map",
     # Stats
     "ProviderStats",
+    # MCP Worker Pool
+    "delegate_task",
+    "analyze_task",
+    "spawn_worker",
+    "execute_skill",
+    "list_workers",
+    "list_skills",
+    "initialize_worker_pool",
+    "get_mcp_tools",
 ]
