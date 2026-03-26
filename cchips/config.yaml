@@ -1,0 +1,71 @@
+# Universal Agent Platform Configuration
+# Copy this file to config.yaml and update with your API keys
+
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    models:
+      - gpt-4
+      - gpt-4-turbo
+      - gpt-4-turbo-preview
+      - gpt-3.5-turbo
+      - gpt-3.5-turbo-16k
+    enabled: true
+    priority: 1
+
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    models:
+      - claude-3-opus-20240229
+      - claude-sonnet-4-6-20250929
+      - claude-3-haiku-20240307
+    enabled: true
+    priority: 2
+
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY:-}
+    base_url: https://openrouter.ai/api/v1
+    models:
+      - meta-llama/llama-3-70b-instruct
+      - mistralai/mixtral-8x7b-instruct
+    enabled: false
+    priority: 10
+
+  ollama:
+    base_url: http://localhost:11434/v1
+    models:
+      - llama3
+      - mistral
+      - codellama
+    enabled: false
+    priority: 20
+
+default_provider: openai
+failover_enabled: true
+
+# Telegram bot settings (configured via API)
+telegram:
+  enabled: false
+  token: ${TELEGRAM_BOT_TOKEN:-}
+  allowed_users: []
+  admin_users: []
+
+# Workflow settings
+workflows:
+  max_parallel: 5
+  default_timeout: 300
+  persistence_enabled: true
+
+# Tool settings
+tools:
+  web_search:
+    engine: searxng
+    searxng_url: ${SEARXNG_URL:-http://localhost:8888}
+  code_exec:
+    sandbox_enabled: true
+    timeout: 30
+
+# Logging
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

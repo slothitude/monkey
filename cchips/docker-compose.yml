@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  llm-router:
+    build:
+      context: ../llm-router
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - SEARXNG_URL=http://searxng:8888
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      - searxng
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8888"
+    environment:
+      - BASE_URL=http://localhost:8888/
+      - INSTANCE_NAME=Universal-Agent-Search
+    volumes:
+      - searxng_data:/usr/local/searxng/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  searxng_data:
+  redis_data:
