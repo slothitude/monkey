@@ -38,6 +38,9 @@ from llm_router.orchestrator import (
 # Tools
 from llm_router.tools import get_tool_registry, ToolDefinition
 
+# Worker Pool
+from llm_router.worker_pool import WorkerPool, WorkerDefinition, WorkerSkill
+
 # Telegram
 from llm_router.telegram_bot import TelegramBot, TelegramConfig, BotStatus
 
@@ -70,13 +73,14 @@ router: LLMRouter | None = None
 agent_registry: AgentRegistry | None = None
 workflow_registry: WorkflowRegistry | None = None
 telegram_bot: TelegramBot | None = None
+worker_pool: "WorkerPool | None" = None
 config_path: str = "config.yaml"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
-    global router, agent_registry, workflow_registry, telegram_bot
+    global router, agent_registry, workflow_registry, telegram_bot, worker_pool
 
     # Initialize router
     router = LLMRouter(load_config(config_path))
@@ -91,6 +95,17 @@ async def lifespan(app: FastAPI):
 
     # Initialize workflow registry
     workflow_registry = WorkflowRegistry(agent_registry)
+
+    # Initialize worker pool (persists across restarts)
+    from llm_router.worker_pool import WorkerPool, get_worker_pool
+    worker_pool = WorkerPool(router, agent_registry, storage_path="./data/workers")
+
+    # Register worker skills as tools for agents
+    for skill_name, skill_func in worker_pool.get_tool_functions().items():
+        agent_registry.register_tool(skill_name, skill_func)
+
+    print(f"Worker pool initialized with {len(worker_pool.list_workers())} workers")
+    print(f"Available worker skills: {list(worker_pool._skills.keys())}")
 
     yield
 
@@ -141,6 +156,20 @@ def get_workflow_registry() -> WorkflowRegistry:
     return workflow_registry
 
 
+def get_worker_pool() -> WorkerPool:
+    """Get the worker pool or raise 503 if not available."""
+    if worker_pool is None:
+        raise HTTPException(status_code=503, detail="Worker pool not initialized")
+    return worker_pool
+
+
+def get_worker_pool() -> "WorkerPool":
+    """Get the worker pool or raise 503 if not available."""
+    if worker_pool is None:
+        raise HTTPException(status_code=503, detail="Worker pool not initialized")
+    return worker_pool
+
+
 # ==================== Health & System ====================
 
 @app.get("/health")
@@ -148,11 +177,14 @@ async def health_check():
     """Health check endpoint."""
     r = get_router()
     available = await r.is_available()
+    wp = worker_pool
     return {
         "status": "healthy" if available else "degraded",
         "providers": list(r._providers.keys()),
         "agents": len(get_agent_registry().list_agents()),
         "workflows": len(get_workflow_registry().list_workflows()),
+        "workers": len(wp.list_workers()) if wp else 0,
+        "worker_skills": len(wp.list_skills()) if wp else 0,
         "telegram": telegram_bot.status.value if telegram_bot else "stopped",
     }
 
@@ -1030,6 +1062,169 @@ def run_server():
         port=8000,
         reload=True,
     )
+
+
+# ==================== Worker Pool ====================
+
+class WorkerCreateRequest(BaseModel):
+    name: str
+    description: str
+    skills: list[str] | None = None
+    agent_type: str = "custom"
+    model: str = "nvidia/llama-3.1-nemotron-70b-instruct"
+    system_prompt: str | None = None
+    tools: list[str] | None = None
+
+
+class SkillExecuteRequest(BaseModel):
+    skill_name: str
+    arguments: dict[str, Any] = {}
+
+
+class TaskAnalyzeRequest(BaseModel):
+    task: str
+    available_worker_types: list[str] | None = None
+
+
+class TaskExecuteRequest(BaseModel):
+    task: str
+    spawn_missing_workers: bool = True
+
+
+@app.get("/v1/workers")
+async def list_workers():
+    """List all worker agents."""
+    wp = get_worker_pool()
+    workers = wp.list_workers()
+    return {
+        "workers": [w.model_dump() for w in workers],
+        "count": len(workers),
+    }
+
+
+@app.post("/v1/workers")
+async def create_worker(data: WorkerCreateRequest):
+    """Create a new worker agent with skills."""
+    wp = get_worker_pool()
+    try:
+        worker = await wp.spawn_worker(
+            name=data.name,
+            description=data.description,
+            skills=data.skills,
+            agent_type=data.agent_type,
+            model=data.model,
+            system_prompt=data.system_prompt,
+            tools=data.tools,
+        )
+        return {"success": True, "worker": worker.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/workers/{worker_id}")
+async def get_worker(worker_id: str):
+    """Get a worker by ID."""
+    wp = get_worker_pool()
+    worker = wp.get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker '{worker_id}' not found")
+    return worker.model_dump()
+
+
+@app.delete("/v1/workers/{worker_id}")
+async def delete_worker(worker_id: str):
+    """Delete a worker."""
+    wp = get_worker_pool()
+    deleted = wp.delete_worker(worker_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Worker '{worker_id}' not found")
+    return {"success": True, "message": f"Worker '{worker_id}' deleted"}
+
+
+@app.get("/v1/skills")
+async def list_skills():
+    """List all available worker skills."""
+    wp = get_worker_pool()
+    skills = wp.list_skills()
+    return {
+        "skills": [s.model_dump() for s in skills],
+        "count": len(skills),
+    }
+
+
+@app.post("/v1/skills/execute")
+async def execute_skill(data: SkillExecuteRequest):
+    """Execute a worker skill."""
+    wp = get_worker_pool()
+    result = await wp.execute_skill(data.skill_name, **data.arguments)
+    return result
+
+
+@app.post("/v1/tasks/analyze")
+async def analyze_task(data: TaskAnalyzeRequest):
+    """Analyze a task and break it into subtasks."""
+    wp = get_worker_pool()
+    breakdown = await wp.analyze_task(data.task, data.available_worker_types)
+    return breakdown.model_dump()
+
+
+@app.post("/v1/tasks/execute")
+async def execute_task(data: TaskExecuteRequest):
+    """Execute a task by breaking it down and running subtasks with workers."""
+    wp = get_worker_pool()
+    # First analyze the task
+    breakdown = await wp.analyze_task(data.task)
+    # Then execute the breakdown
+    result = await wp.execute_breakdown(breakdown, data.spawn_missing_workers)
+    return result
+
+
+@app.post("/v1/manager/delegate")
+async def manager_delegate(data: TaskExecuteRequest):
+    """
+    Manager agent delegates a task to worker agents.
+
+    This is the main entry point for task delegation:
+    1. Analyzes the task
+    2. Spawns appropriate workers if needed
+    3. Executes subtasks in dependency order
+    4. Aggregates results
+    """
+    wp = get_worker_pool()
+
+    # Analyze task
+    breakdown = await wp.analyze_task(data.task)
+
+    # Execute with worker spawning
+    result = await wp.execute_breakdown(breakdown, data.spawn_missing_workers)
+
+    # Summarize results
+    summary_prompt = f"""Original task: {data.task}
+
+Subtask results:
+{json.dumps(result.get('results', {}), indent=2)}
+
+Provide a concise summary of what was accomplished."""
+
+    # Use router directly for summary
+    r = get_router()
+    try:
+        summary_response = await r.chat(
+            messages=[{"role": "user", "content": summary_prompt}],
+            model="minimaxai/minimax-m2.5",  # Use working free model
+            max_tokens=500,
+        )
+        summary = summary_response.choices[0].message.content if summary_response.choices else ""
+    except Exception:
+        summary = "Summary generation failed"
+
+    return {
+        "success": True,
+        "task": data.task,
+        "subtasks_completed": len(result.get("completed_subtasks", [])),
+        "results": result.get("results", {}),
+        "summary": summary,
+    }
 
 
 if __name__ == "__main__":

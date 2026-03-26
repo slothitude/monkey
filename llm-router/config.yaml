@@ -6,9 +6,10 @@ providers:
     api_key: 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
     base_url: "https://integrate.api.nvidia.com/v1"
     models:
-      - "nvidia/llama-3.1-nemotron-70b-instruct"
+      # NVIDIA free models (tested working)
+      - "minimaxai/minimax-m2.5"
+      - "microsoft/phi-4-mini-instruct"
       - "meta/llama-3.1-8b-instruct"
-      - "mistralai/mistral-large"
     enabled: true
     priority: 1
 
@@ -17,10 +18,10 @@ providers:
     base_url: "https://openrouter.ai/api/v1"
     models:
       # Working free models
+      - "stepfun/step-3.5-flash:free"
       - "google/gemma-3-27b-it:free"
       - "google/gemma-3-12b-it:free"
       - "google/gemma-3-4b-it:free"
-      - "meta-llama/llama-3.2-3b-instruct:free"
     enabled: true
     priority: 2
     extra:
