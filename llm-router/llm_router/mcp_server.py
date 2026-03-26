@@ -26,12 +26,12 @@ from typing import Any
 # Initialize worker pool on import
 from llm_router.mcp_worker import (
     initialize_worker_pool,
-    delegate_task,
-    analyze_task,
-    spawn_worker,
-    execute_skill,
-    list_workers,
-    list_skills,
+    delegate_task_async,
+    analyze_task_async,
+    spawn_worker_async,
+    execute_skill_async,
+    list_workers_async,
+    list_skills_async,
     TOOL_DEFINITIONS,
 )
 
@@ -81,29 +81,29 @@ class MCPServer:
                 arguments = params.get("arguments", {})
 
                 if tool_name == "delegate_task":
-                    result = delegate_task(
+                    result = await delegate_task_async(
                         task=arguments.get("task"),
                         spawn_missing=arguments.get("spawn_missing", True),
                         context=arguments.get("context")
                     )
                 elif tool_name == "analyze_task":
-                    result = analyze_task(task=arguments.get("task"))
+                    result = await analyze_task_async(task=arguments.get("task"))
                 elif tool_name == "spawn_worker":
-                    result = spawn_worker(
+                    result = await spawn_worker_async(
                         name=arguments.get("name"),
                         description=arguments.get("description"),
                         skills=arguments.get("skills", []),
                         model=arguments.get("model", "minimaxai/minimax-m2.5")
                     )
                 elif tool_name == "execute_skill":
-                    result = execute_skill(
+                    result = await execute_skill_async(
                         skill_name=arguments.get("skill_name"),
                         **{k: v for k, v in arguments.items() if k != "skill_name"}
                     )
                 elif tool_name == "list_workers":
-                    result = list_workers()
+                    result = await list_workers_async()
                 elif tool_name == "list_skills":
-                    result = list_skills()
+                    result = await list_skills_async()
                 else:
                     return {
                         "jsonrpc": "2.0",
