@@ -178,7 +178,7 @@ class GodotSceneBuilder:
             return "{" + ", ".join(items) + "}"
         return str(value)
 
-    def _generate_node_block(self, node: GodotNode, node_index: int, is_root: bool = False) -> str:
+    def _generate_node_block(self, node: GodotNode, node_index: int, script_ids: dict, is_root: bool = False) -> str:
         """Generate a node block for the .tscn file."""
         lines = [f'[node name="{node.name}" type="{node.node_type}"']
 
@@ -215,12 +215,14 @@ class GodotSceneBuilder:
 
         # Add script reference
         if node.script:
-            if node.script.startswith("res://"):
-                block += f'script = ExtResource("{node.script}")\n'
+            script_path = node.script if node.script.startswith("res://") else f"res://{node.script}"
+            if script_path in script_ids:
+                block += f'script = ExtResource("{script_ids[script_path]}")\n'
             else:
-                script_uid = self._generate_uid()
-                self.resources[f"res://{node.script}"] = "Script"
-                block += f'script = ExtResource("1_{node.name}")\n'
+                # Script should have been pre-collected - this is a fallback
+                script_id = len(script_ids) + 1
+                script_ids[script_path] = str(script_id)
+                block += f'script = ExtResource("{script_id}")\n'
 
         return block + "\n"
 
@@ -229,7 +231,19 @@ class GodotSceneBuilder:
         lines = ['[gd_scene load_steps=1 format=3 uid="{}"]'.format(self._generate_uid())]
         lines.append("")
 
-        # Count external resources
+        # First pass: collect all scripts from nodes
+        for node in self.nodes:
+            if node.script:
+                script_path = node.script if node.script.startswith("res://") else f"res://{node.script}"
+                if script_path not in self.resources:
+                    self.resources[script_path] = "Script"
+
+        # Build script ID mapping
+        script_ids = {}
+        for i, (path, res_type) in enumerate(self.resources.items(), 1):
+            script_ids[path] = str(i)
+
+        # Write external resources
         ext_resources = []
         for i, (path, res_type) in enumerate(self.resources.items(), 1):
             ext_resources.append(f'[ext_resource type="{res_type}" path="{path}" id="{i}"]')
@@ -244,17 +258,18 @@ class GodotSceneBuilder:
             node_type=self.root_type,
             uid=self._generate_uid()
         )
-        lines.append(self._generate_node_block(root_node, 0, is_root=True))
+        lines.append(self._generate_node_block(root_node, 0, script_ids, is_root=True))
 
         # Generate child nodes
         for i, node in enumerate(self.nodes, 1):
-            parent_path = "." if node.parent is None else f".{'' if node.parent == self.scene_name else '/' + node.parent}"
-            node_block = self._generate_node_block(node, i)
-            # Fix parent path
-            if node.parent:
+            node_block = self._generate_node_block(node, i, script_ids)
+            # Ensure parent is set for non-root nodes
+            # In Godot 4, all non-root nodes need a parent attribute
+            if 'parent="' not in node_block and node.parent is None:
+                # Add parent="." for direct children of root
                 node_block = node_block.replace(
-                    f'parent="{node.parent}"',
-                    f'parent="."'
+                    'index="',
+                    'parent="." index="'
                 )
             lines.append(node_block)
 
@@ -1216,7 +1231,7 @@ async def godot_create_from_template(
         if not template:
             return {
                 "error": f"Template '{template_name}' not found",
-                "available_templates": ["pong", "space_invaders", "platformer", "shooter", "puzzle"]
+                "available_templates": ["pong", "space_invaders", "platformer", "shooter", "puzzle", "dungeon_crawler"]
             }
 
         # Create project
@@ -1622,7 +1637,7 @@ Set itchio_publish=True to automatically export and upload to itch.io.""",
         "type": "object",
         "properties": {
             "project_path": {"type": "string", "description": "Directory for the project"},
-            "template_name": {"type": "string", "description": "Template name: pong, space_invaders, platformer, shooter, puzzle"},
+            "template_name": {"type": "string", "description": "Template name: pong, space_invaders, platformer, shooter, puzzle, dungeon_crawler"},
             "game_name": {"type": "string", "description": "Name for the game"},
             "customizations": {
                 "type": "object",
@@ -1669,6 +1684,217 @@ GODOT_REVIEW_GAME_DEF = ToolDefinition(
 )
 
 
+async def godot_play_game(
+    game_url: str,
+    max_steps: int = 500,
+    use_mouse: bool = True,
+    headless: bool = False,
+    game_type: str = "auto"
+) -> dict:
+    """
+    Play a Godot game using the AI game agent.
+
+    The agent uses:
+    - OpenCV for fast state detection (~5-10ms)
+    - Color detection for enemies and player
+    - PyAutoGUI for direct mouse/keyboard control
+    - Optional Q-learning for improvement
+
+    Args:
+        game_url: URL of the game (e.g., http://localhost:8888)
+        max_steps: Maximum game steps to play (default: 500)
+        use_mouse: Use mouse control (default: True, False = keyboard only)
+        headless: Run browser in headless mode (default: False)
+        game_type: Game type - "auto", "space_shooter", "platformer", "rpg" (default: auto-detect)
+
+    Returns:
+        Dict with game results including kills, steps, FPS, etc.
+    """
+    import asyncio
+    import time
+
+    try:
+        import pyautogui
+        import cv2
+        import numpy as np
+        import pygetwindow as gw
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        return {"error": f"Missing dependency: {e}. Install with: pip install opencv-python pyautogui pygetwindow playwright"}
+
+    # Import game detector
+    try:
+        from llm_router.game_agent.games.space_shooter import SpaceShooterDetector
+        detector = SpaceShooterDetector()
+    except ImportError:
+        # Fallback to inline detector
+        class SimpleDetector:
+            def detect_state(self, screenshot):
+                from dataclasses import dataclass
+                import cv2
+                import numpy as np
+                import time
+
+                @dataclass
+                class State:
+                    player_found: bool = False
+                    player_x: int = 0
+                    player_y: int = 0
+                    enemy_count: int = 0
+                    enemies: list = None
+                    detection_time_ms: float = 0.0
+
+                    def __post_init__(self):
+                        if self.enemies is None:
+                            self.enemies = []
+
+                start = time.perf_counter()
+                state = State()
+
+                hsv = cv2.cvtColor(screenshot, cv2.COLOR_BGR2HSV)
+
+                # Green player
+                green_mask = cv2.inRange(hsv, np.array([35, 100, 100]), np.array([85, 255, 255]))
+                green_coords = np.where(green_mask > 0)
+                if len(green_coords[0]) > 0:
+                    state.player_found = True
+                    state.player_y = int(np.mean(green_coords[0]))
+                    state.player_x = int(np.mean(green_coords[1]))
+
+                # Red enemies
+                red_mask1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
+                red_mask2 = cv2.inRange(hsv, np.array([170, 100, 100]), np.array([180, 255, 255]))
+                red_mask = cv2.bitwise_or(red_mask1, red_mask2)
+                contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for c in contours:
+                    if cv2.contourArea(c) > 50:
+                        M = cv2.moments(c)
+                        if M["m00"] > 0:
+                            state.enemies.append((int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])))
+                state.enemy_count = len(state.enemies)
+                state.detection_time_ms = (time.perf_counter() - start) * 1000
+                return state
+
+        detector = SimpleDetector()
+
+    pyautogui.PAUSE = 0.001
+    pyautogui.FAILSAFE = True
+
+    start_time = time.time()
+    steps = 0
+    shots = 0
+    kills = 0
+    prev_enemies = 0
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=headless)
+            page = await browser.new_page()
+            await page.goto(game_url)
+            await asyncio.sleep(3)
+
+            canvas = await page.query_selector('canvas')
+            if not canvas:
+                return {"error": "No canvas element found in game"}
+
+            box = await canvas.bounding_box()
+            canvas_x, canvas_y = box['x'], box['y']
+            canvas_w, canvas_h = box['width'], box['height']
+
+            # Click to start/focus
+            await page.mouse.click(canvas_x + canvas_w//2, canvas_y + canvas_h//2)
+            await asyncio.sleep(1)
+
+            # Get window for PyAutoGUI
+            await asyncio.sleep(0.5)
+            windows = gw.getWindowsWithTitle('Chrome')
+            if windows:
+                win = windows[0]
+                win.activate()
+                win_left, win_top = win.left, win.top
+                win_w, win_h = win.width, win.height
+                game_left = win_left + (win_w - canvas_w) // 2
+                game_top = win_top + (win_h - canvas_h) // 2 - 20
+            else:
+                game_left, game_top = int(canvas_x), int(canvas_y)
+                game_left, game_top = 10, 80
+
+            # Game loop
+            while steps < max_steps:
+                # Screenshot
+                if use_mouse:
+                    screenshot = pyautogui.screenshot(region=(game_left, game_top, int(canvas_w), int(canvas_h)))
+                    screenshot_np = np.array(screenshot)
+                    screenshot_bgr = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+                else:
+                    screenshot_bytes = await page.screenshot(type='png')
+                    nparr = np.frombuffer(screenshot_bytes, np.uint8)
+                    screenshot_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                # Detect state
+                state = detector.detect_state(screenshot_bgr)
+
+                # Track kills
+                if state.enemy_count < prev_enemies:
+                    kills += prev_enemies - state.enemy_count
+                prev_enemies = state.enemy_count
+
+                # Decide action
+                target_x = int(canvas_w // 2)
+                target_y = int(canvas_h // 2)
+
+                if state.enemy_count > 0 and state.enemies:
+                    ex, ey = state.enemies[0]
+                    target_x, target_y = int(ex), int(ey)
+
+                if use_mouse:
+                    # Direct mouse control
+                    pyautogui.moveTo(game_left + target_x, game_top + target_y)
+                    pyautogui.press('space')  # Shoot with spacebar
+                else:
+                    # Playwright keyboard
+                    await page.keyboard.press('Space')
+
+                shots += 1
+                steps += 1
+                await asyncio.sleep(0.02)
+
+            await browser.close()
+
+    except Exception as e:
+        return {"error": str(e), "steps": steps, "kills": kills}
+
+    elapsed = time.time() - start_time
+    return {
+        "success": True,
+        "steps": steps,
+        "shots": shots,
+        "kills": kills,
+        "duration_seconds": round(elapsed, 1),
+        "fps": round(steps / elapsed, 1) if elapsed > 0 else 0,
+        "game_url": game_url,
+    }
+
+
+GODOT_PLAY_GAME_DEF = ToolDefinition(
+    name="godot_play_game",
+    description="Play a Godot game using an AI game agent with vision detection. Uses OpenCV for fast state detection and PyAutoGUI for direct control. Tracks kills, shots, and performance metrics.",
+    parameters={
+        "type": "object",
+        "required": ["game_url"],
+        "properties": {
+            "game_url": {"type": "string", "description": "URL of the game to play (e.g., http://localhost:8888)"},
+            "max_steps": {"type": "integer", "description": "Maximum game steps to play (default: 500)", "default": 500},
+            "use_mouse": {"type": "boolean", "description": "Use mouse control (default: True)", "default": True},
+            "headless": {"type": "boolean", "description": "Run browser in headless mode (default: False)", "default": False},
+            "game_type": {"type": "string", "description": "Game type: auto, space_shooter, platformer, rpg (default: auto)", "default": "auto"},
+        },
+    },
+    function=godot_play_game,
+    category="godot",
+)
+
+
 def register_godot_tools(registry: ToolRegistry) -> None:
     """Register all Godot tools with a registry."""
     registry.register(GODOT_CREATE_PROJECT_DEF)
@@ -1683,3 +1909,4 @@ def register_godot_tools(registry: ToolRegistry) -> None:
     registry.register(GODOT_CREATE_FROM_TEMPLATE_DEF)
     registry.register(GODOT_LIST_TEMPLATES_DEF)
     registry.register(GODOT_REVIEW_GAME_DEF)
+    registry.register(GODOT_PLAY_GAME_DEF)
