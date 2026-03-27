@@ -6,30 +6,35 @@ providers:
     api_key: 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
     base_url: "https://integrate.api.nvidia.com/v1"
     models:
-      # NVIDIA free models (tested working)
-      - "minimaxai/minimax-m2.5"
-      - "microsoft/phi-4-mini-instruct"
       - "meta/llama-3.1-8b-instruct"
+      - "microsoft/phi-4-mini-instruct"
+      - "minimaxai/minimax-m2.5"
     enabled: true
     priority: 1
+    timeout: 600
 
-  openrouter:
-    api_key: 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
-    base_url: "https://openrouter.ai/api/v1"
-    models:
-      # Working free models
-      - "stepfun/step-3.5-flash:free"
-      - "google/gemma-3-27b-it:free"
-      - "google/gemma-3-12b-it:free"
-      - "google/gemma-3-4b-it:free"
-    enabled: true
-    priority: 2
-    extra:
-      headers:
-        HTTP-Referer: "https://github.com/anthropics/claude-code"
-        X-Title: "Universal Agent Platform"
+  # openrouter:
+  #   api_key: INVALID_KEY_DISABLED
+  #   base_url: "https://openrouter.ai/api/v1"
+  #   models: []
+  #   enabled: false
+  #   priority: 2
+
+# itch.io configuration for game publishing
+itchio:
+  api_key: "WhOy1Oyv4IVJhVWt7aEEJlx3Pc3zjBQC8bhcPcSl"
+  username: "slothitude"
+  default_channel: "html5"
+
+# Game Library configuration
+game_library:
+  directories:
+    - "./data/games"
+    - "./games"
+  library_path: "./data/game_library.json"
+  auto_scan: true
 
 # Global settings
 default_provider: nvidia
 failover_enabled: true
-timeout: 120
+timeout: 300

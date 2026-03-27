@@ -816,40 +816,56 @@ class GameResponse(BaseModel):
     objective: str | None = None
 
 
-# In-memory game tracking
-_games: dict[str, dict] = {}
-_game_servers: dict[str, int] = {}  # game_id -> port
+# Game Library - unified game management
+from llm_router.tools.game_library import get_game_library, GameLibrary
+
+game_library: GameLibrary | None = None
+
+
+def get_game_library_instance() -> GameLibrary:
+    """Get the game library instance."""
+    global game_library
+    if game_library is None:
+        game_library = get_game_library(config_path)
+    return game_library
 
 
 @app.get("/v1/games")
-async def list_games(path: str = "./data/games"):
-    """List all games in the games directory."""
-    games_dir = Path(path)
-    if not games_dir.exists():
-        return {"games": [], "count": 0}
+async def list_games(
+    game_type: str | None = None,
+    status: str | None = None,
+):
+    """List all games in the library with optional filters."""
+    library = get_game_library_instance()
+    games = library.list(filter_type=game_type, filter_status=status)
 
-    games = []
-    for game_dir in games_dir.iterdir():
-        if game_dir.is_dir() and (game_dir / "project.godot").exists():
-            game_id = game_dir.name
-            game_info = {
-                "id": game_id,
-                "name": game_id.replace("_", " ").title(),
-                "path": str(game_dir),
-                "status": _games.get(game_id, {}).get("status", "created"),
-                "play_url": None,
-            }
-            export_dir = game_dir / "export" / "html"
-            if export_dir.exists() and (export_dir / "index.html").exists():
-                game_info["export_path"] = str(export_dir)
-                if game_id in _game_servers:
-                    game_info["play_url"] = f"http://localhost:{_game_servers[game_id]}"
-                    game_info["status"] = "serving"
-                else:
-                    game_info["status"] = "exported"
-            games.append(game_info)
+    # Add serving info
+    result = []
+    for game in games:
+        game_dict = game.model_dump()
+        port = library.get_server_port(game.id)
+        if port:
+            game_dict["play_url"] = f"http://localhost:{port}"
+        result.append(game_dict)
 
-    return {"games": games, "count": len(games)}
+    return {"games": result, "count": len(result), "stats": library.get_stats()}
+
+
+@app.get("/v1/games/search")
+async def search_games(q: str):
+    """Search games by name or type."""
+    library = get_game_library_instance()
+    games = library.search(q)
+
+    result = []
+    for game in games:
+        game_dict = game.model_dump()
+        port = library.get_server_port(game.id)
+        if port:
+            game_dict["play_url"] = f"http://localhost:{port}"
+        result.append(game_dict)
+
+    return {"games": result, "count": len(result), "query": q}
 
 
 @app.get("/v1/games/templates")
@@ -865,6 +881,7 @@ async def create_game(request: GameCreateRequest):
     import uuid
     from llm_router.tools.godot_tools import godot_create_from_template, godot_export_web, godot_serve_game
 
+    library = get_game_library_instance()
     game_id = request.game_name.lower().replace(" ", "_")
     project_path = f"./data/games/{game_id}"
 
@@ -879,54 +896,65 @@ async def create_game(request: GameCreateRequest):
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
 
-    game_info = {
-        "id": game_id,
-        "name": request.game_name,
-        "game_type": request.game_type,
-        "path": project_path,
-        "status": "created",
-        "files": result.get("files_created", []),
-        "controls": result.get("controls"),
-        "objective": result.get("objective"),
-    }
+    # Register with library
+    game = library.register(
+        path=project_path,
+        game_type=request.game_type,
+        name=request.game_name,
+        controls=result.get("controls"),
+        objective=result.get("objective"),
+        status="created",
+    )
 
-    _games[game_id] = game_info
+    game_dict = game.model_dump()
+    game_dict["files"] = result.get("files_created", [])
 
     # Auto export if requested
     if request.auto_export:
         export_result = await godot_export_web(project_path)
         if export_result.get("success"):
-            game_info["status"] = "exported"
-            game_info["export_path"] = export_result.get("export_path")
+            game = library.update_status(
+                game_id,
+                "exported",
+                export_path=export_result.get("export_path"),
+            )
 
             # Auto serve if requested
-            if request.auto_serve and game_info.get("export_path"):
-                port = 8888 + len(_game_servers)
-                serve_result = await godot_serve_game(game_info["export_path"], port)
+            if request.auto_serve and game and game.export_path:
+                port = 8888 + len([p for p in [library.get_server_port(gid) for gid in library._games.keys()] if p])
+                serve_result = await godot_serve_game(game.export_path, port)
                 if serve_result.get("success"):
-                    game_info["status"] = "serving"
-                    game_info["play_url"] = serve_result.get("url")
-                    _game_servers[game_id] = port
+                    game = library.update_status(game_id, "serving", play_url=serve_result.get("url"), port=port)
+                    library.set_server_port(game_id, port)
+                    game_dict["play_url"] = serve_result.get("url")
 
-    _games[game_id] = game_info
-    return game_info
+            game_dict = game.model_dump() if game else game_dict
+
+    return game_dict
 
 
 @app.get("/v1/games/{game_id}")
 async def get_game(game_id: str):
     """Get game details including files, status, play URL."""
-    games = (await list_games())["games"]
-    game = next((g for g in games if g["id"] == game_id), None)
+    library = get_game_library_instance()
+    game = library.get(game_id)
 
     if not game:
         raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
 
-    # Add file list
-    game_path = Path(game["path"])
-    if game_path.exists():
-        game["files"] = [f.name for f in game_path.iterdir() if f.is_file()]
+    game_dict = game.model_dump()
 
-    return game
+    # Add file list
+    game_path = Path(game.path)
+    if game_path.exists():
+        game_dict["files"] = [f.name for f in game_path.iterdir() if f.is_file()]
+
+    # Add serving info
+    port = library.get_server_port(game_id)
+    if port:
+        game_dict["play_url"] = f"http://localhost:{port}"
+
+    return game_dict
 
 
 @app.post("/v1/games/{game_id}/export")
@@ -934,8 +962,8 @@ async def export_game(game_id: str, platform: str = "web"):
     """Export game to specified platform."""
     from llm_router.tools.godot_tools import godot_export_web
 
-    games = (await list_games())["games"]
-    game = next((g for g in games if g["id"] == game_id), None)
+    library = get_game_library_instance()
+    game = library.get(game_id)
 
     if not game:
         raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
@@ -943,14 +971,12 @@ async def export_game(game_id: str, platform: str = "web"):
     if platform != "web":
         raise HTTPException(status_code=400, detail="Only 'web' platform is currently supported")
 
-    result = await godot_export_web(game["path"])
+    result = await godot_export_web(game.path)
 
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    game["status"] = "exported"
-    game["export_path"] = result.get("export_path")
-    _games[game_id] = game
+    library.update_status(game_id, "exported", export_path=result.get("export_path"))
 
     return {
         "success": True,
@@ -965,13 +991,18 @@ async def serve_game(game_id: str, port: int = 8888):
     """Start HTTP server for the game."""
     from llm_router.tools.godot_tools import godot_serve_game
 
-    game = _games.get(game_id)
-    if not game or not game.get("export_path"):
+    library = get_game_library_instance()
+    game = library.get(game_id)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    if not game.export_path:
         # Try to export first
         await export_game(game_id)
-        game = _games.get(game_id)
+        game = library.get(game_id)
 
-    if not game or not game.get("export_path"):
+    if not game or not game.export_path:
         raise HTTPException(status_code=400, detail="Game must be exported first")
 
     # Find available port
@@ -984,15 +1015,13 @@ async def serve_game(game_id: str, port: int = 8888):
             break
         port += 1
 
-    serve_result = await godot_serve_game(game["export_path"], port)
+    serve_result = await godot_serve_game(game.export_path, port)
 
     if "error" in serve_result:
         raise HTTPException(status_code=500, detail=serve_result["error"])
 
-    game["status"] = "serving"
-    game["play_url"] = serve_result.get("url")
-    _games[game_id] = game
-    _game_servers[game_id] = port
+    library.update_status(game_id, "serving", play_url=serve_result.get("url"), port=port)
+    library.set_server_port(game_id, port)
 
     return {
         "success": True,
@@ -1005,14 +1034,14 @@ async def serve_game(game_id: str, port: int = 8888):
 @app.delete("/v1/games/{game_id}/serve")
 async def stop_serving_game(game_id: str):
     """Stop the game server."""
-    if game_id not in _game_servers:
+    library = get_game_library_instance()
+    port = library.get_server_port(game_id)
+
+    if not port:
         raise HTTPException(status_code=404, detail="Game server not running")
 
-    port = _game_servers.pop(game_id)
-    game = _games.get(game_id)
-    if game:
-        game["status"] = "exported"
-        game["play_url"] = None
+    library.set_server_port(game_id, None)
+    library.update_status(game_id, "exported", play_url=None, port=None)
 
     # Note: Stopping the actual server requires tracking the server object
     # For now, the server will stop when the process ends
@@ -1027,22 +1056,18 @@ async def delete_game(game_id: str):
     """Delete a game and its files."""
     import shutil
 
-    game = _games.get(game_id)
-    if not game:
-        games = (await list_games())["games"]
-        game = next((g for g in games if g["id"] == game_id), None)
+    library = get_game_library_instance()
+    game = library.get(game_id)
 
     if not game:
         raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
 
-    game_path = Path(game["path"])
+    game_path = Path(game.path)
     if game_path.exists():
         shutil.rmtree(game_path)
 
-    if game_id in _games:
-        del _games[game_id]
-    if game_id in _game_servers:
-        del _game_servers[game_id]
+    library.unregister(game_id)
+    library.set_server_port(game_id, None)
 
     return {"success": True, "message": f"Game '{game_id}' deleted"}
 
@@ -1050,13 +1075,13 @@ async def delete_game(game_id: str):
 @app.get("/v1/games/{game_id}/validate")
 async def validate_game(game_id: str):
     """Validate game for errors."""
-    games = (await list_games())["games"]
-    game = next((g for g in games if g["id"] == game_id), None)
+    library = get_game_library_instance()
+    game = library.get(game_id)
 
     if not game:
         raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
 
-    game_path = Path(game["path"])
+    game_path = Path(game.path)
     issues = []
 
     # Check project.godot
@@ -1086,8 +1111,8 @@ async def preview_game(game_id: str, mode: str = "window"):
     from llm_router.tools.godot_tools import find_godot
     import subprocess
 
-    games = (await list_games())["games"]
-    game = next((g for g in games if g["id"] == game_id), None)
+    library = get_game_library_instance()
+    game = library.get(game_id)
 
     if not game:
         raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
@@ -1096,7 +1121,7 @@ async def preview_game(game_id: str, mode: str = "window"):
     if not godot_exe:
         raise HTTPException(status_code=400, detail="Godot not installed")
 
-    game_path = Path(game["path"])
+    game_path = Path(game.path)
 
     try:
         subprocess.Popen(

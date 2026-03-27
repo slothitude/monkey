@@ -12,6 +12,46 @@ from pathlib import Path
 from typing import Any, Optional, Union
 from llm_router.tools import ToolDefinition, ToolRegistry
 
+# Game library integration
+from llm_router.tools.game_library import get_game_library, GameLibrary
+
+
+def _register_game_in_library(
+    project_path: str,
+    game_name: str,
+    game_type: str,
+    controls: str = None,
+    objective: str = None,
+) -> None:
+    """Register a game in the library after creation."""
+    try:
+        library = get_game_library()
+        library.register(
+            path=project_path,
+            game_type=game_type,
+            name=game_name,
+            controls=controls,
+            objective=objective,
+            status="created",
+        )
+    except Exception as e:
+        # Don't fail game creation if library registration fails
+        print(f"Warning: Could not register game in library: {e}")
+
+
+def _update_game_status_in_library(
+    project_path: str,
+    status: str,
+    **kwargs,
+) -> None:
+    """Update game status in the library."""
+    try:
+        library = get_game_library()
+        game_id = Path(project_path).name
+        library.update_status(game_id, status, **kwargs)
+    except Exception as e:
+        print(f"Warning: Could not update game status in library: {e}")
+
 
 def _find_free_port(start_port: int = 8080, max_port: int = 8999) -> int:
     """Find a free port in the specified range."""
@@ -777,7 +817,7 @@ async def godot_export_web(
         files = list(export_dir.glob("*"))
         file_names = [f.name for f in files]
 
-        return {
+        result_dict = {
             "success": result.returncode == 0 or len(files) > 0,
             "export_path": str(export_dir),
             "files": file_names,
@@ -787,6 +827,16 @@ async def godot_export_web(
             "stdout": result.stdout[-1000:] if result.stdout else "",
             "stderr": result.stderr[-500:] if result.stderr else "",
         }
+
+        # Update game library status
+        if result_dict["success"]:
+            _update_game_status_in_library(
+                project_path,
+                "exported",
+                export_path=str(export_dir),
+            )
+
+        return result_dict
 
     except subprocess.TimeoutExpired:
         return {"error": "Export timed out after 120 seconds"}
@@ -980,6 +1030,27 @@ async def godot_serve_game(
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
+        # Update game library status
+        # Try to find the game ID from the export path
+        try:
+            library = get_game_library()
+            # Walk up to find project directory
+            parent = export_dir.parent
+            while parent.parent != parent:
+                if (parent / "project.godot").exists():
+                    game_id = parent.name
+                    library.update_status(
+                        game_id,
+                        "serving",
+                        play_url=f"http://localhost:{actual_port}",
+                        port=actual_port,
+                    )
+                    library.set_server_port(game_id, actual_port)
+                    break
+                parent = parent.parent
+        except Exception as e:
+            print(f"Warning: Could not update library status: {e}")
+
         return {
             "success": True,
             "url": f"http://localhost:{actual_port}",
@@ -1157,6 +1228,16 @@ async def godot_create_game(
                 "message": f"Created basic {game_type} game '{game_name}' with {len(files_created)} files",
             }
 
+        # Register game in library
+        _register_game_in_library(
+            project_path=str(project_dir),
+            game_name=game_name,
+            game_type=game_type,
+            controls=base_result.get("controls"),
+            objective=base_result.get("objective"),
+        )
+        base_result["library_registered"] = True
+
         # Handle itch.io publishing if requested
         if itchio_publish:
             if not itchio_username:
@@ -1272,6 +1353,16 @@ async def godot_create_from_template(
             "has_issues": review_result.get("issue_count", 0) > 0,
             "message": f"Created {template.name} game '{game_name}' from template",
         }
+
+        # Register game in library
+        _register_game_in_library(
+            project_path=str(project_dir),
+            game_name=game_name,
+            game_type=template_name,
+            controls=template.controls,
+            objective=template.objective,
+        )
+        base_result["library_registered"] = True
 
         # Handle itch.io publishing if requested
         if itchio_publish:

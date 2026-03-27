@@ -124,13 +124,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "godot_create_game",
-        "description": "Create a complete, playable Godot game from a template. Templates: pong, space_invaders, platformer, shooter, puzzle.",
+        "description": "Create a complete, playable Godot game from a template. Templates: pong, space_invaders, platformer, shooter, puzzle, dungeon_crawler.",
         "parameters": {
             "type": "object",
             "properties": {
                 "project_path": {"type": "string", "description": "Directory for the project"},
                 "game_name": {"type": "string", "description": "Name of the game"},
-                "game_type": {"type": "string", "description": "Type: pong, space_invaders, platformer, shooter, puzzle"},
+                "game_type": {"type": "string", "description": "Type: pong, space_invaders, platformer, shooter, puzzle, dungeon_crawler"},
                 "description": {"type": "string", "description": "Description of the game"}
             },
             "required": ["project_path", "game_name", "game_type"]
@@ -143,7 +143,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "project_path": {"type": "string", "description": "Directory for the project"},
-                "template_name": {"type": "string", "description": "Template: pong, space_invaders, platformer, shooter, puzzle"},
+                "template_name": {"type": "string", "description": "Template: pong, space_invaders, platformer, shooter, puzzle, dungeon_crawler"},
                 "game_name": {"type": "string", "description": "Name for the game"},
                 "customizations": {"type": "object", "description": "Optional customizations (colors, speed, difficulty)"}
             },
@@ -210,7 +210,7 @@ TOOL_DEFINITIONS = [
     # ==================== Godot Asset Tools ====================
     {
         "name": "godot_create_sprite",
-        "description": "Create a sprite asset for a Godot game. Types: rectangle, circle, triangle, star, heart, arrow, diamond, hexagon, player_ship, enemy, bullet, coin, paddle, ball.",
+        "description": "Create a sprite asset for a Godot game. Basic: rectangle, circle, triangle, star, heart, arrow, diamond, hexagon. Game: player_ship, enemy, bullet, coin, paddle, ball. Dungeon: dungeon_wall, dungeon_floor, dungeon_door, dungeon_stairs, dungeon_chest. Items: potion_health, potion_mana, key, gold_coins. Spells: spell_fireball, spell_lightning, spell_heal, spell_shield. Enemies: enemy_rat, enemy_goblin, enemy_skeleton, enemy_orc, enemy_demon, enemy_dragon_boss.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -262,6 +262,47 @@ TOOL_DEFINITIONS = [
                 "frames": {"type": "array", "description": "List of frame configurations"}
             },
             "required": ["project_path", "animation_name", "frames"]
+        }
+    },
+
+    # ==================== Kenney.nl Asset Tools ====================
+    {
+        "name": "godot_list_kenney_assets",
+        "description": "List available free CC0 game asset packs from Kenney.nl. All assets are completely free, no attribution required. Categories: 2D, 3D, Audio, Textures, UI, Pixel.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Filter by category: 2D, 3D, Audio, Textures, UI, Pixel (optional)",
+                    "enum": ["2D", "3D", "Audio", "Textures", "UI", "Pixel"]
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "godot_search_kenney_assets",
+        "description": "Search Kenney.nl asset packs by keyword. Returns matching packs sorted by relevance. Example keywords: platformer, space, car, dungeon, pirate.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keyword"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "godot_download_kenney_asset",
+        "description": "Download a Kenney.nl asset pack and extract it into a Godot project. Downloads ZIP and extracts all assets. All assets are CC0 licensed - free to use, no attribution required.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_path": {"type": "string", "description": "Path to the Godot project"},
+                "asset_slug": {"type": "string", "description": "Asset pack slug (e.g., 'new-platformer-pack', 'pirate-kit')"},
+                "target_folder": {"type": "string", "description": "Where to extract (default: 'assets/kenney')", "default": "assets/kenney"}
+            },
+            "required": ["project_path", "asset_slug"]
         }
     },
 
@@ -386,9 +427,61 @@ TOOL_DEFINITIONS = [
                 "prompt": {"type": "string", "description": "Description of the music style"},
                 "duration": {"type": "integer", "default": 120},
                 "bpm": {"type": "integer", "default": 140},
-                "instrumental": {"type": "boolean", "default": true}
+                "instrumental": {"type": "boolean", "default": True}
             },
             "required": ["project_path", "music_name", "prompt"]
+        }
+    },
+
+    # ==================== Game Library Tools ====================
+    {
+        "name": "library_scan",
+        "description": "Scan all configured directories for Godot games and update the library. Returns list of all discovered games.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "library_list",
+        "description": "List all games in the library with optional filters by type or status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filter_type": {"type": "string", "description": "Filter by game type (pong, platformer, shooter, etc.)"},
+                "filter_status": {"type": "string", "description": "Filter by status (created, exported, serving)"}
+            }
+        }
+    },
+    {
+        "name": "library_get",
+        "description": "Get detailed info for a specific game including controls, objective, and play URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "game_id": {"type": "string", "description": "The game ID (directory name)"}
+            },
+            "required": ["game_id"]
+        }
+    },
+    {
+        "name": "library_search",
+        "description": "Search games by name or type. Returns matching games sorted by name.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query (searches name, ID, and type)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "library_register",
+        "description": "Manually register a game directory in the library.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the game directory"},
+                "game_type": {"type": "string", "description": "Optional game type (pong, platformer, etc.)"}
+            },
+            "required": ["path"]
         }
     },
 ]
@@ -432,12 +525,44 @@ async def handle_tool_call(tool_name: str, arguments: dict) -> dict:
     elif tool_name == "list_skills":
         return await list_skills_async()
 
+    # Game Library Tools
+    elif tool_name.startswith("library_"):
+        return await handle_library_tool(tool_name, arguments)
+
     # Godot Tools - Import and call dynamically
     elif tool_name.startswith("godot_"):
         return await handle_godot_tool(tool_name, arguments)
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}
+
+
+async def handle_library_tool(tool_name: str, arguments: dict) -> dict:
+    """Handle game library tool calls."""
+    try:
+        from llm_router.tools import game_library
+
+        if tool_name == "library_scan":
+            return await game_library.library_scan()
+        elif tool_name == "library_list":
+            return await game_library.library_list(
+                filter_type=arguments.get("filter_type"),
+                filter_status=arguments.get("filter_status"),
+            )
+        elif tool_name == "library_get":
+            return await game_library.library_get(game_id=arguments.get("game_id"))
+        elif tool_name == "library_search":
+            return await game_library.library_search(query=arguments.get("query"))
+        elif tool_name == "library_register":
+            return await game_library.library_register(
+                path=arguments.get("path"),
+                game_type=arguments.get("game_type"),
+            )
+
+        return {"error": f"Unknown library tool: {tool_name}"}
+
+    except Exception as e:
+        return {"error": str(e), "tool": tool_name}
 
 
 async def handle_godot_tool(tool_name: str, arguments: dict) -> dict:
@@ -469,7 +594,8 @@ async def handle_godot_tool(tool_name: str, arguments: dict) -> dict:
             elif tool_name == "godot_serve_game":
                 return await godot_tools.godot_serve_game(**arguments)
 
-        elif tool_name in ["godot_create_sprite", "godot_create_sound", "godot_create_animation"]:
+        elif tool_name in ["godot_create_sprite", "godot_create_sound", "godot_create_animation",
+                           "godot_list_kenney_assets", "godot_search_kenney_assets", "godot_download_kenney_asset"]:
             from llm_router.tools import godot_assets
 
             if tool_name == "godot_create_sprite":
@@ -478,6 +604,12 @@ async def handle_godot_tool(tool_name: str, arguments: dict) -> dict:
                 return await godot_assets.godot_create_sound(**arguments)
             elif tool_name == "godot_create_animation":
                 return await godot_assets.godot_create_animation(**arguments)
+            elif tool_name == "godot_list_kenney_assets":
+                return await godot_assets.godot_list_kenney_assets(**arguments)
+            elif tool_name == "godot_search_kenney_assets":
+                return await godot_assets.godot_search_kenney_assets(**arguments)
+            elif tool_name == "godot_download_kenney_asset":
+                return await godot_assets.godot_download_kenney_asset(**arguments)
 
         elif tool_name in ["godot_validate_project", "godot_run_with_output",
                            "godot_preview", "godot_debug_scene"]:
