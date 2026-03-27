@@ -103,4 +103,16 @@ def get_tool_registry() -> ToolRegistry:
         # Register built-in tools
         from llm_router.tools.builtin import register_builtin_tools
         register_builtin_tools(_global_registry)
+        # Register Godot tools
+        from llm_router.tools.godot_tools import register_godot_tools
+        register_godot_tools(_global_registry)
+        # Register Godot asset tools
+        from llm_router.tools.godot_assets import register_godot_asset_tools
+        register_godot_asset_tools(_global_registry)
+        # Register Godot debug tools
+        from llm_router.tools.godot_debug import register_godot_debug_tools
+        register_godot_debug_tools(_global_registry)
+        # Register AI art tools
+        from llm_router.tools.ai_art import register_ai_art_tools
+        register_ai_art_tools(_global_registry)
     return _global_registry

@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Creator - Universal Agent Platform</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        header h1 {
+            font-size: 28px;
+            background: linear-gradient(90deg, #478cbf, #41d6c3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #478cbf, #41d6c3);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(71, 140, 191, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* Templates Section */
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            margin-bottom: 15px;
+            color: #41d6c3;
+        }
+
+        .templates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .template-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .template-card:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-3px);
+            border-color: #478cbf;
+        }
+
+        .template-card h3 {
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .template-card p {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .template-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 11px;
+        }
+
+        .template-meta span {
+            background: rgba(71, 140, 191, 0.2);
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #478cbf;
+        }
+
+        /* Games Grid */
+        .games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .game-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s;
+        }
+
+        .game-card:hover {
+            border-color: #478cbf;
+            transform: translateY(-3px);
+        }
+
+        .game-preview {
+            width: 100%;
+            height: 150px;
+            background: #2a2a4a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+        }
+
+        .game-info {
+            padding: 15px;
+        }
+
+        .game-info h3 {
+            margin-bottom: 5px;
+            color: #fff;
+        }
+
+        .game-info .game-type {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .game-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+
+        .status-created {
+            background: rgba(52, 152, 219, 0.2);
+            color: #3498db;
+        }
+
+        .status-exported {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .status-serving {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+        }
+
+        .status-error {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+
+        .game-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            color: #fff;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #888;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #478cbf;
+        }
+
+        /* Game Player Modal */
+        .player-modal {
+            max-width: 900px;
+        }
+
+        .player-container {
+            position: relative;
+            width: 100%;
+            padding-top: 75%; /* 4:3 aspect ratio */
+        }
+
+        .player-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        /* Console Output */
+        .console-output {
+            background: #0d0d1a;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .console-line {
+            margin-bottom: 5px;
+        }
+
+        .console-line.error {
+            color: #e74c3c;
+        }
+
+        .console-line.warning {
+            color: #f1c40f;
+        }
+
+        .console-line.success {
+            color: #2ecc71;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #478cbf;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 2000;
+        }
+
+        .toast {
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-top: 10px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            border-left: 3px solid #2ecc71;
+        }
+
+        .toast.error {
+            border-left: 3px solid #e74c3c;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .games-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>Game Creator</h1>
+            <div class="header-actions">
+                <button class="btn btn-secondary" onclick="showCreateFromPromptModal()">
+                    + Create from Prompt
+                </button>
+                <button class="btn btn-primary" onclick="showCreateFromTemplateModal()">
+                    + Create from Template
+                </button>
+            </div>
+        </header>
+
+        <!-- Templates Section -->
+        <section class="section">
+            <h2 class="section-title">Quick Start Templates</h2>
+            <div class="templates-grid" id="templates-grid">
+                <!-- Templates loaded dynamically -->
+            </div>
+        </section>
+
+        <!-- My Games Section -->
+        <section class="section">
+            <h2 class="section-title">My Games</h2>
+            <div class="games-grid" id="games-grid">
+                <!-- Games loaded dynamically -->
+            </div>
+            <div class="empty-state" id="empty-state" style="display: none;">
+                <div class="icon">🎮</div>
+                <p>No games yet. Create one from a template or describe what you want to build!</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Create from Template Modal -->
+    <div class="modal-overlay" id="template-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Create Game from Template</h2>
+                <button class="modal-close" onclick="closeModal('template-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Template</label>
+                    <select id="template-select">
+                        <!-- Options loaded dynamically -->
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Game Name</label>
+                    <input type="text" id="template-game-name" placeholder="My Awesome Game">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="template-auto-export" checked>
+                        Auto-export to Web
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="template-auto-serve">
+                        Auto-serve (play immediately)
+                    </label>
+                </div>
+                <button class="btn btn-primary" onclick="createFromTemplate()" style="width: 100%;">
+                    Create Game
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create from Prompt Modal -->
+    <div class="modal-overlay" id="prompt-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Create Game with AI</h2>
+                <button class="modal-close" onclick="closeModal('prompt-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Describe your game</label>
+                    <textarea id="game-prompt" placeholder="Create a space shooter where I control a ship and shoot asteroids. Include power-ups and a score system."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Game Name (optional)</label>
+                    <input type="text" id="prompt-game-name" placeholder="Auto-generated if empty">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="prompt-auto-export" checked>
+                        Auto-export to Web
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="prompt-auto-serve" checked>
+                        Auto-serve (play immediately)
+                    </label>
+                </div>
+                <button class="btn btn-primary" onclick="createFromPrompt()" style="width: 100%;" id="create-prompt-btn">
+                    Generate Game
+                </button>
+                <div class="console-output" id="creation-console" style="display: none;">
+                    <!-- Console output -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Player Modal -->
+    <div class="modal-overlay" id="player-modal">
+        <div class="modal player-modal">
+            <div class="modal-header">
+                <h2 id="player-title">Playing Game</h2>
+                <button class="modal-close" onclick="closePlayer()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="player-container">
+                    <iframe id="game-iframe" src="about:blank"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Details Modal -->
+    <div class="modal-overlay" id="details-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="details-title">Game Details</h2>
+                <button class="modal-close" onclick="closeModal('details-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="details-content">
+                    <!-- Details loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // State
+        let templates = [];
+        let games = [];
+        let currentGameId = null;
+
+        // API Base URL
+        const API_BASE = window.location.origin;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTemplates();
+            loadGames();
+        });
+
+        // API Functions
+        async function fetchAPI(endpoint, options = {}) {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+            return response.json();
+        }
+
+        // Load Templates
+        async function loadTemplates() {
+            try {
+                const data = await fetchAPI('/v1/games/templates');
+                templates = data.templates || [];
+                renderTemplates();
+                populateTemplateSelect();
+            } catch (error) {
+                console.error('Failed to load templates:', error);
+                showToast('Failed to load templates', 'error');
+            }
+        }
+
+        // Load Games
+        async function loadGames() {
+            try {
+                const data = await fetchAPI('/v1/games');
+                games = data.games || [];
+                renderGames();
+            } catch (error) {
+                console.error('Failed to load games:', error);
+                showToast('Failed to load games', 'error');
+            }
+        }
+
+        // Render Templates
+        function renderTemplates() {
+            const grid = document.getElementById('templates-grid');
+            grid.innerHTML = templates.map(t => `
+                <div class="template-card" onclick="quickCreate('${t.type}')">
+                    <h3>${t.name}</h3>
+                    <p>${t.description}</p>
+                    <div class="template-meta">
+                        <span>${t.difficulty}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Populate Template Select
+        function populateTemplateSelect() {
+            const select = document.getElementById('template-select');
+            select.innerHTML = templates.map(t =>
+                `<option value="${t.type}">${t.name} - ${t.description}</option>`
+            ).join('');
+        }
+
+        // Render Games
+        function renderGames() {
+            const grid = document.getElementById('games-grid');
+            const emptyState = document.getElementById('empty-state');
+
+            if (games.length === 0) {
+                grid.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            grid.innerHTML = games.map(game => `
+                <div class="game-card">
+                    <div class="game-preview">
+                        ${getGameIcon(game.game_type)}
+                    </div>
+                    <div class="game-info">
+                        <h3>${game.name}</h3>
+                        <div class="game-type">${game.game_type || 'custom'}</div>
+                        <span class="game-status status-${game.status}">${game.status}</span>
+                        <div class="game-actions">
+                            ${game.status === 'serving' || game.status === 'exported' ?
+                                `<button class="btn btn-primary btn-small" onclick="playGame('${game.id}', '${game.play_url || ''}')">Play</button>` :
+                                `<button class="btn btn-secondary btn-small" onclick="exportGame('${game.id}')">Export</button>`
+                            }
+                            ${game.status === 'exported' && !game.play_url ?
+                                `<button class="btn btn-secondary btn-small" onclick="serveGame('${game.id}')">Serve</button>` : ''
+                            }
+                            <button class="btn btn-secondary btn-small" onclick="showDetails('${game.id}')">Details</button>
+                            <button class="btn btn-danger btn-small" onclick="deleteGame('${game.id}')">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Get Game Icon
+        function getGameIcon(type) {
+            const icons = {
+                'pong': '🏓',
+                'space_invaders': '👾',
+                'platformer': '🏃',
+                'shooter': '🚀',
+                'puzzle': '🧩',
+                'default': '🎮'
+            };
+            return icons[type] || icons['default'];
+        }
+
+        // Quick Create
+        async function quickCreate(templateType) {
+            document.getElementById('template-select').value = templateType;
+            document.getElementById('template-game-name').value = '';
+            showCreateFromTemplateModal();
+        }
+
+        // Modal Functions
+        function showCreateFromTemplateModal() {
+            document.getElementById('template-modal').classList.add('active');
+        }
+
+        function showCreateFromPromptModal() {
+            document.getElementById('prompt-modal').classList.add('active');
+            document.getElementById('creation-console').style.display = 'none';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        // Create from Template
+        async function createFromTemplate() {
+            const templateName = document.getElementById('template-select').value;
+            const gameName = document.getElementById('template-game-name').value || templateName + '_' + Date.now();
+            const autoExport = document.getElementById('template-auto-export').checked;
+            const autoServe = document.getElementById('template-auto-serve').checked;
+
+            closeModal('template-modal');
+            showToast(`Creating ${gameName}...`, 'info');
+
+            try {
+                const data = await fetchAPI('/v1/games', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_name: gameName,
+                        game_type: templateName,
+                        auto_export: autoExport,
+                        auto_serve: autoServe
+                    })
+                });
+
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast(`Created ${data.name || gameName}!`, 'success');
+                    loadGames();
+
+                    if (data.play_url) {
+                        playGame(data.id, data.play_url);
+                    }
+                }
+            } catch (error) {
+                showToast('Failed to create game', 'error');
+            }
+        }
+
+        // Create from Prompt (using game agent)
+        async function createFromPrompt() {
+            const prompt = document.getElementById('game-prompt').value;
+            const gameName = document.getElementById('prompt-game-name').value;
+            const autoExport = document.getElementById('prompt-auto-export').checked;
+            const autoServe = document.getElementById('prompt-auto-serve').checked;
+
+            if (!prompt) {
+                showToast('Please describe your game', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('create-prompt-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Generating...';
+
+            const consoleEl = document.getElementById('creation-console');
+            consoleEl.style.display = 'block';
+            consoleEl.innerHTML = '<div class="console-line">Starting AI game generation...</div>';
+
+            try {
+                // Use the game agent to create the game
+                const data = await fetchAPI('/v1/agents/game-creator/execute', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        prompt: `Create a Godot game: ${prompt}. Game name: ${gameName || 'auto'}. Auto-export: ${autoExport}. Auto-serve: ${autoServe}.`
+                    })
+                });
+
+                if (data.error) {
+                    consoleEl.innerHTML += `<div class="console-line error">Error: ${data.error}</div>`;
+                    showToast('Failed to create game', 'error');
+                } else {
+                    consoleEl.innerHTML += `<div class="console-line success">Game created successfully!</div>`;
+                    if (data.result) {
+                        consoleEl.innerHTML += `<div class="console-line">${data.result}</div>`;
+                    }
+                    showToast('Game created!', 'success');
+                    loadGames();
+                    closeModal('prompt-modal');
+                }
+            } catch (error) {
+                consoleEl.innerHTML += `<div class="console-line error">Error: ${error.message}</div>`;
+                showToast('Failed to create game', 'error');
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = 'Generate Game';
+        }
+
+        // Play Game
+        function playGame(gameId, playUrl) {
+            if (!playUrl) {
+                showToast('Game is not being served', 'error');
+                return;
+            }
+
+            currentGameId = gameId;
+            document.getElementById('player-title').textContent = `Playing: ${gameId}`;
+            document.getElementById('game-iframe').src = playUrl;
+            document.getElementById('player-modal').classList.add('active');
+        }
+
+        function closePlayer() {
+            document.getElementById('game-iframe').src = 'about:blank';
+            closeModal('player-modal');
+        }
+
+        // Export Game
+        async function exportGame(gameId) {
+            showToast('Exporting game...', 'info');
+            try {
+                const data = await fetchAPI(`/v1/games/${gameId}/export`, { method: 'POST' });
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast('Game exported!', 'success');
+                    loadGames();
+                }
+            } catch (error) {
+                showToast('Failed to export game', 'error');
+            }
+        }
+
+        // Serve Game
+        async function serveGame(gameId) {
+            showToast('Starting server...', 'info');
+            try {
+                const data = await fetchAPI(`/v1/games/${gameId}/serve`, { method: 'POST' });
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast(`Game served at ${data.url}`, 'success');
+                    loadGames();
+                    playGame(gameId, data.url);
+                }
+            } catch (error) {
+                showToast('Failed to serve game', 'error');
+            }
+        }
+
+        // Delete Game
+        async function deleteGame(gameId) {
+            if (!confirm(`Delete game "${gameId}"? This cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const data = await fetchAPI(`/v1/games/${gameId}`, { method: 'DELETE' });
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast('Game deleted', 'success');
+                    loadGames();
+                }
+            } catch (error) {
+                showToast('Failed to delete game', 'error');
+            }
+        }
+
+        // Show Details
+        async function showDetails(gameId) {
+            try {
+                const data = await fetchAPI(`/v1/games/${gameId}`);
+                const validateData = await fetchAPI(`/v1/games/${gameId}/validate`);
+
+                document.getElementById('details-title').textContent = data.name;
+                document.getElementById('details-content').innerHTML = `
+                    <div class="form-group">
+                        <label>Status</label>
+                        <span class="game-status status-${data.status}">${data.status}</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <p>${data.game_type || 'custom'}</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Path</label>
+                        <p style="font-family: monospace; font-size: 12px;">${data.path}</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Files (${data.files?.length || 0})</label>
+                        <p style="font-size: 12px; max-height: 100px; overflow-y: auto;">
+                            ${data.files?.join('<br>') || 'No files'}
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>Validation</label>
+                        <p style="color: ${validateData.valid ? '#2ecc71' : '#e74c3c'}">
+                            ${validateData.valid ? 'Valid' : 'Has issues'}
+                        </p>
+                        ${validateData.issues?.length ? `
+                            <div class="console-output">
+                                ${validateData.issues.map(i =>
+                                    `<div class="console-line ${i.severity === 'critical' ? 'error' : 'warning'}">
+                                        [${i.severity}] ${i.message}
+                                        ${i.fix ? `<br>Fix: ${i.fix}` : ''}
+                                    </div>`
+                                ).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="game-actions" style="margin-top: 20px;">
+                        <button class="btn btn-primary" onclick="playGame('${gameId}', '${data.play_url || ''}')" ${!data.play_url ? 'disabled' : ''}>
+                            Play
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportGame('${gameId}')">
+                            Export
+                        </button>
+                        <button class="btn btn-secondary" onclick="serveGame('${gameId}')">
+                            Serve
+                        </button>
+                    </div>
+                `;
+                document.getElementById('details-modal').classList.add('active');
+            } catch (error) {
+                showToast('Failed to load details', 'error');
+            }
+        }
+
+        // Toast Notification
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // Close modals on escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    if (modal.id !== 'player-modal') {
+                        modal.classList.remove('active');
+                    }
+                });
+            }
+        });
+
+        // Close modals on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

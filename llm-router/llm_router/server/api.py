@@ -88,10 +88,10 @@ async def lifespan(app: FastAPI):
     # Initialize agent registry
     agent_registry = AgentRegistry(router)
 
-    # Register built-in tools
+    # Register built-in tools (with full definitions for function calling)
     tool_registry = get_tool_registry()
-    for tool_name in tool_registry.get_functions():
-        agent_registry.register_tool(tool_name, tool_registry.get(tool_name).function)
+    for tool_def in tool_registry.list_tools():
+        agent_registry.register_tool(tool_def)
 
     # Initialize workflow registry
     workflow_registry = WorkflowRegistry(agent_registry)
@@ -100,9 +100,9 @@ async def lifespan(app: FastAPI):
     from llm_router.worker_pool import WorkerPool, get_worker_pool
     worker_pool = WorkerPool(router, agent_registry, storage_path="./data/workers")
 
-    # Register worker skills as tools for agents
+    # Register worker skills as tools for agents (simple function registration)
     for skill_name, skill_func in worker_pool.get_tool_functions().items():
-        agent_registry.register_tool(skill_name, skill_func)
+        agent_registry.register_tool_function(skill_name, skill_func)
 
     print(f"Worker pool initialized with {len(worker_pool.list_workers())} workers")
     print(f"Available worker skills: {list(worker_pool._skills.keys())}")
@@ -219,6 +219,15 @@ async def gui():
     if static_path.exists():
         return HTMLResponse(content=static_path.read_text(encoding="utf-8"), status_code=200)
     return HTMLResponse(content="<h1>GUI not found</h1>", status_code=404)
+
+
+@app.get("/games", response_class=HTMLResponse)
+async def games_dashboard():
+    """Serve the Games Dashboard."""
+    static_path = Path(__file__).parent / "static" / "games.html"
+    if static_path.exists():
+        return HTMLResponse(content=static_path.read_text(encoding="utf-8"), status_code=200)
+    return HTMLResponse(content="<h1>Games dashboard not found</h1>", status_code=404)
 
 
 # ==================== Config ====================
@@ -773,6 +782,331 @@ async def remove_provider(provider_name: str):
 
     del r.config.providers[provider_name]
     return {"success": True, "message": f"Provider '{provider_name}' removed. Restart server to apply."}
+
+
+# ==================== Games ====================
+
+class GameCreateRequest(BaseModel):
+    game_name: str
+    game_type: str  # pong, space_invaders, platformer, shooter, puzzle
+    template: str | None = None
+    customizations: dict | None = None
+    auto_export: bool = True
+    auto_serve: bool = False
+
+
+class GameFromPromptRequest(BaseModel):
+    prompt: str
+    game_name: str | None = None
+    auto_export: bool = True
+    auto_serve: bool = False
+    max_iterations: int = 20
+
+
+class GameResponse(BaseModel):
+    id: str
+    name: str
+    game_type: str
+    path: str
+    status: str  # created, exported, serving, error
+    files: list[str]
+    play_url: str | None = None
+    export_path: str | None = None
+    controls: str | None = None
+    objective: str | None = None
+
+
+# In-memory game tracking
+_games: dict[str, dict] = {}
+_game_servers: dict[str, int] = {}  # game_id -> port
+
+
+@app.get("/v1/games")
+async def list_games(path: str = "./data/games"):
+    """List all games in the games directory."""
+    games_dir = Path(path)
+    if not games_dir.exists():
+        return {"games": [], "count": 0}
+
+    games = []
+    for game_dir in games_dir.iterdir():
+        if game_dir.is_dir() and (game_dir / "project.godot").exists():
+            game_id = game_dir.name
+            game_info = {
+                "id": game_id,
+                "name": game_id.replace("_", " ").title(),
+                "path": str(game_dir),
+                "status": _games.get(game_id, {}).get("status", "created"),
+                "play_url": None,
+            }
+            export_dir = game_dir / "export" / "html"
+            if export_dir.exists() and (export_dir / "index.html").exists():
+                game_info["export_path"] = str(export_dir)
+                if game_id in _game_servers:
+                    game_info["play_url"] = f"http://localhost:{_game_servers[game_id]}"
+                    game_info["status"] = "serving"
+                else:
+                    game_info["status"] = "exported"
+            games.append(game_info)
+
+    return {"games": games, "count": len(games)}
+
+
+@app.get("/v1/games/templates")
+async def list_game_templates():
+    """List available game templates."""
+    from llm_router.tools.godot_templates import list_templates
+    return {"templates": list_templates(), "count": len(list_templates())}
+
+
+@app.post("/v1/games")
+async def create_game(request: GameCreateRequest):
+    """Create a game from template."""
+    import uuid
+    from llm_router.tools.godot_tools import godot_create_from_template, godot_export_web, godot_serve_game
+
+    game_id = request.game_name.lower().replace(" ", "_")
+    project_path = f"./data/games/{game_id}"
+
+    # Create game from template
+    result = await godot_create_from_template(
+        project_path=project_path,
+        template_name=request.game_type,
+        game_name=request.game_name,
+        customizations=request.customizations
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    game_info = {
+        "id": game_id,
+        "name": request.game_name,
+        "game_type": request.game_type,
+        "path": project_path,
+        "status": "created",
+        "files": result.get("files_created", []),
+        "controls": result.get("controls"),
+        "objective": result.get("objective"),
+    }
+
+    _games[game_id] = game_info
+
+    # Auto export if requested
+    if request.auto_export:
+        export_result = await godot_export_web(project_path)
+        if export_result.get("success"):
+            game_info["status"] = "exported"
+            game_info["export_path"] = export_result.get("export_path")
+
+            # Auto serve if requested
+            if request.auto_serve and game_info.get("export_path"):
+                port = 8888 + len(_game_servers)
+                serve_result = await godot_serve_game(game_info["export_path"], port)
+                if serve_result.get("success"):
+                    game_info["status"] = "serving"
+                    game_info["play_url"] = serve_result.get("url")
+                    _game_servers[game_id] = port
+
+    _games[game_id] = game_info
+    return game_info
+
+
+@app.get("/v1/games/{game_id}")
+async def get_game(game_id: str):
+    """Get game details including files, status, play URL."""
+    games = (await list_games())["games"]
+    game = next((g for g in games if g["id"] == game_id), None)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    # Add file list
+    game_path = Path(game["path"])
+    if game_path.exists():
+        game["files"] = [f.name for f in game_path.iterdir() if f.is_file()]
+
+    return game
+
+
+@app.post("/v1/games/{game_id}/export")
+async def export_game(game_id: str, platform: str = "web"):
+    """Export game to specified platform."""
+    from llm_router.tools.godot_tools import godot_export_web
+
+    games = (await list_games())["games"]
+    game = next((g for g in games if g["id"] == game_id), None)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    if platform != "web":
+        raise HTTPException(status_code=400, detail="Only 'web' platform is currently supported")
+
+    result = await godot_export_web(game["path"])
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    game["status"] = "exported"
+    game["export_path"] = result.get("export_path")
+    _games[game_id] = game
+
+    return {
+        "success": True,
+        "game_id": game_id,
+        "export_path": result.get("export_path"),
+        "files": result.get("files", []),
+    }
+
+
+@app.post("/v1/games/{game_id}/serve")
+async def serve_game(game_id: str, port: int = 8888):
+    """Start HTTP server for the game."""
+    from llm_router.tools.godot_tools import godot_serve_game
+
+    game = _games.get(game_id)
+    if not game or not game.get("export_path"):
+        # Try to export first
+        await export_game(game_id)
+        game = _games.get(game_id)
+
+    if not game or not game.get("export_path"):
+        raise HTTPException(status_code=400, detail="Game must be exported first")
+
+    # Find available port
+    import socket
+    while True:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', port))
+        sock.close()
+        if result != 0:
+            break
+        port += 1
+
+    serve_result = await godot_serve_game(game["export_path"], port)
+
+    if "error" in serve_result:
+        raise HTTPException(status_code=500, detail=serve_result["error"])
+
+    game["status"] = "serving"
+    game["play_url"] = serve_result.get("url")
+    _games[game_id] = game
+    _game_servers[game_id] = port
+
+    return {
+        "success": True,
+        "game_id": game_id,
+        "url": serve_result.get("url"),
+        "port": port,
+    }
+
+
+@app.delete("/v1/games/{game_id}/serve")
+async def stop_serving_game(game_id: str):
+    """Stop the game server."""
+    if game_id not in _game_servers:
+        raise HTTPException(status_code=404, detail="Game server not running")
+
+    port = _game_servers.pop(game_id)
+    game = _games.get(game_id)
+    if game:
+        game["status"] = "exported"
+        game["play_url"] = None
+
+    # Note: Stopping the actual server requires tracking the server object
+    # For now, the server will stop when the process ends
+    return {
+        "success": True,
+        "message": f"Game server stopped (port {port} will be freed on restart)",
+    }
+
+
+@app.delete("/v1/games/{game_id}")
+async def delete_game(game_id: str):
+    """Delete a game and its files."""
+    import shutil
+
+    game = _games.get(game_id)
+    if not game:
+        games = (await list_games())["games"]
+        game = next((g for g in games if g["id"] == game_id), None)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    game_path = Path(game["path"])
+    if game_path.exists():
+        shutil.rmtree(game_path)
+
+    if game_id in _games:
+        del _games[game_id]
+    if game_id in _game_servers:
+        del _game_servers[game_id]
+
+    return {"success": True, "message": f"Game '{game_id}' deleted"}
+
+
+@app.get("/v1/games/{game_id}/validate")
+async def validate_game(game_id: str):
+    """Validate game for errors."""
+    games = (await list_games())["games"]
+    game = next((g for g in games if g["id"] == game_id), None)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    game_path = Path(game["path"])
+    issues = []
+
+    # Check project.godot
+    if not (game_path / "project.godot").exists():
+        issues.append({"severity": "error", "message": "Missing project.godot"})
+
+    # Check for main scene
+    main_scene = game_path / f"{game_id}.tscn"
+    if not main_scene.exists():
+        issues.append({"severity": "warning", "message": f"Missing main scene {game_id}.tscn"})
+
+    # Check for scripts
+    gd_files = list(game_path.glob("*.gd"))
+    if not gd_files:
+        issues.append({"severity": "warning", "message": "No GDScript files found"})
+
+    return {
+        "game_id": game_id,
+        "valid": len([i for i in issues if i["severity"] == "error"]) == 0,
+        "issues": issues,
+    }
+
+
+@app.post("/v1/games/{game_id}/preview")
+async def preview_game(game_id: str, mode: str = "window"):
+    """Open game in Godot for preview."""
+    from llm_router.tools.godot_tools import find_godot
+    import subprocess
+
+    games = (await list_games())["games"]
+    game = next((g for g in games if g["id"] == game_id), None)
+
+    if not game:
+        raise HTTPException(status_code=404, detail=f"Game '{game_id}' not found")
+
+    godot_exe = find_godot()
+    if not godot_exe:
+        raise HTTPException(status_code=400, detail="Godot not installed")
+
+    game_path = Path(game["path"])
+
+    try:
+        subprocess.Popen(
+            [godot_exe, "--path", str(game_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {"success": True, "message": "Godot editor opened"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Telegram ====================

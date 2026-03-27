@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from llm_router import LLMRouter
 from llm_router.models import ChatCompletionResponse, ChatMessage
+from llm_router.tools import ToolDefinition
 
 
 class AgentStatus(str, Enum):
@@ -144,14 +145,17 @@ class Agent:
         config: AgentConfig,
         router: LLMRouter,
         tools: dict[str, Callable] | None = None,
+        tool_definitions: dict[str, ToolDefinition] | None = None,
     ):
         self.config = config
         self.router = router
         self.tools = tools or {}
+        self.tool_definitions = tool_definitions or {}
         self.memory = AgentMemory() if config.memory_enabled else None
         self.status = AgentStatus.IDLE
         self._current_execution: AgentExecution | None = None
         self._executions: list[AgentExecution] = []
+        self.max_tool_iterations = 10  # Prevent infinite loops
 
     @property
     def id(self) -> str:
@@ -176,7 +180,7 @@ class Agent:
         **kwargs
     ) -> AgentExecution:
         """
-        Execute the agent with a prompt.
+        Execute the agent with a prompt. Supports agentic tool-calling loop.
 
         Args:
             prompt: User input
@@ -200,7 +204,7 @@ class Agent:
             # Build messages
             messages = []
 
-            # System prompt
+            # System prompt with tool descriptions
             system_prompt = system_override or self.config.system_prompt
             if self.memory:
                 context = self.memory.get_context_for_prompt()
@@ -218,34 +222,76 @@ class Agent:
             # Add current prompt
             messages.append({"role": "user", "content": prompt})
 
-            # Call LLM
-            response = await self.router.chat(
-                messages=messages,
-                model=self.config.model,
-                max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
-                temperature=kwargs.get("temperature", self.config.temperature),
-                **{k: v for k, v in kwargs.items() if k not in ["max_tokens", "temperature"]},
-            )
+            # Build tools parameter if we have tool definitions
+            tools_param = None
+            if self.tool_definitions:
+                tools_param = list(self.tool_definitions.values())
 
-            # Extract response
-            content = response.choices[0].message.content if response.choices else ""
-            execution.response = content
-            execution.tokens_used = response.usage.total_tokens if response.usage else 0
+            # Agentic loop - keep calling LLM until no more tool calls
+            iteration = 0
+            final_content = ""
 
-            # Handle tool calls if present
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                for tool_call in response.tool_calls:
+            while iteration < self.max_tool_iterations:
+                iteration += 1
+
+                # Call LLM
+                response = await self.router.chat(
+                    messages=messages,
+                    model=self.config.model,
+                    max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
+                    temperature=kwargs.get("temperature", self.config.temperature),
+                    tools=tools_param,
+                    **{k: v for k, v in kwargs.items() if k not in ["max_tokens", "temperature", "tools"]},
+                )
+
+                # Track tokens
+                if response.usage:
+                    execution.tokens_used += response.usage.total_tokens
+
+                # Get response content and tool calls
+                choice = response.choices[0] if response.choices else None
+                if not choice:
+                    break
+
+                content = choice.message.content or ""
+                tool_calls = choice.tool_calls or choice.message.tool_calls
+
+                # Add assistant message to history
+                assistant_msg = {"role": "assistant", "content": content}
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+                messages.append(assistant_msg)
+
+                # If no tool calls, we're done
+                if not tool_calls:
+                    final_content = content
+                    break
+
+                # Execute tool calls
+                for tool_call in tool_calls:
                     tool_result = await self._execute_tool(tool_call)
                     execution.tool_calls.append({
-                        "name": tool_call.function.name if hasattr(tool_call, "function") else tool_call.get("name"),
-                        "arguments": tool_call.function.arguments if hasattr(tool_call, "function") else tool_call.get("arguments"),
+                        "name": tool_call.get("function", {}).get("name") if isinstance(tool_call, dict) else tool_call.function.name,
+                        "arguments": tool_call.get("function", {}).get("arguments") if isinstance(tool_call, dict) else tool_call.function.arguments,
                         "result": tool_result,
                     })
+
+                    # Add tool result to messages
+                    tool_id = tool_call.get("id") if isinstance(tool_call, dict) else tool_call.id
+                    tool_name = tool_call.get("function", {}).get("name") if isinstance(tool_call, dict) else tool_call.function.name
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "name": tool_name,
+                        "content": json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result,
+                    })
+
+            execution.response = final_content
 
             # Update memory
             if self.memory:
                 self.memory.add_message("user", prompt)
-                self.memory.add_message("assistant", content or "")
+                self.memory.add_message("assistant", final_content or "")
 
             execution.status = AgentStatus.COMPLETED
             execution.completed_at = datetime.utcnow()
@@ -322,12 +368,20 @@ class Agent:
     async def _execute_tool(self, tool_call: Any) -> Any:
         """Execute a tool call."""
         try:
-            if hasattr(tool_call, "function"):
+            # Handle different tool_call formats
+            if isinstance(tool_call, dict):
+                # Dict format from API
+                func_data = tool_call.get("function", {})
+                tool_name = func_data.get("name") if isinstance(func_data, dict) else tool_call.get("name")
+                args_str = func_data.get("arguments", "{}") if isinstance(func_data, dict) else tool_call.get("arguments", "{}")
+            elif hasattr(tool_call, "function"):
+                # Object format
                 tool_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments)
+                args_str = tool_call.function.arguments
             else:
-                tool_name = tool_call.get("name")
-                arguments = json.loads(tool_call.get("arguments", "{}"))
+                return {"error": f"Unknown tool_call format: {type(tool_call)}"}
+
+            arguments = json.loads(args_str) if isinstance(args_str, str) else args_str
 
             if tool_name in self.tools:
                 func = self.tools[tool_name]
@@ -383,11 +437,20 @@ class AgentRegistry:
     def __init__(self, router: LLMRouter):
         self.router = router
         self._agents: dict[str, Agent] = {}
-        self._tool_registry: dict[str, Callable] = {}
+        self._tool_registry: dict[str, ToolDefinition] = {}
 
-    def register_tool(self, name: str, func: Callable) -> None:
+    def register_tool(self, tool: ToolDefinition) -> None:
         """Register a global tool available to all agents."""
-        self._tool_registry[name] = func
+        self._tool_registry[tool.name] = tool
+
+    def register_tool_function(self, name: str, func: Callable, description: str = "", parameters: dict = None) -> None:
+        """Register a tool by function (creates a simple ToolDefinition)."""
+        self._tool_registry[name] = ToolDefinition(
+            name=name,
+            description=description or f"Tool: {name}",
+            parameters=parameters or {"type": "object", "properties": {}},
+            function=func,
+        )
 
     def unregister_tool(self, name: str) -> None:
         """Unregister a global tool."""
@@ -401,11 +464,22 @@ class AgentRegistry:
         """Create and register a new agent."""
         # Get tools for this agent
         agent_tools = {}
+        agent_tool_defs = {}
         for tool_name in config.tools:
             if tool_name in self._tool_registry:
-                agent_tools[tool_name] = self._tool_registry[tool_name]
+                tool_def = self._tool_registry[tool_name]
+                agent_tools[tool_name] = tool_def.function
+                # Build OpenAI tool format
+                agent_tool_defs[tool_name] = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_def.name,
+                        "description": tool_def.description,
+                        "parameters": tool_def.parameters,
+                    }
+                }
 
-        agent = Agent(config, self.router, agent_tools)
+        agent = Agent(config, self.router, agent_tools, agent_tool_defs)
         self._agents[agent.id] = agent
         return agent
 
@@ -435,10 +509,21 @@ class AgentRegistry:
 
         # Update tools
         agent_tools = {}
+        agent_tool_defs = {}
         for tool_name in config.tools:
             if tool_name in self._tool_registry:
-                agent_tools[tool_name] = self._tool_registry[tool_name]
+                tool_def = self._tool_registry[tool_name]
+                agent_tools[tool_name] = tool_def.function
+                agent_tool_defs[tool_name] = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_def.name,
+                        "description": tool_def.description,
+                        "parameters": tool_def.parameters,
+                    }
+                }
         agent.tools = agent_tools
+        agent.tool_definitions = agent_tool_defs
 
         return agent
 
@@ -476,3 +561,219 @@ class AgentRegistry:
                 agent.memory = AgentMemory.from_dict(agent_data["memory"])
             registry._agents[aid] = agent
         return registry
+
+
+# =============================================================================
+# Specialized Game Agent Configuration
+# =============================================================================
+
+# System prompt for game development
+GAME_AGENT_SYSTEM_PROMPT = """You are an expert Godot 4.x game developer. You create complete, playable games with proper scenes, scripts, assets, and UI.
+
+## Your Workflow
+
+When creating a game:
+1. Always start with `godot_check_install` to verify Godot is available
+2. Use `godot_create_from_template` if a template matches the request (pong, space_invaders, platformer, shooter, puzzle)
+3. For custom games, use `godot_create_project` + `godot_build_scene`
+4. Add scripts with `godot_add_script` using proper GDScript syntax (typed, Godot 4.x)
+5. Create sprites with `godot_create_sprite` and sounds with `godot_create_sound`
+6. Validate the project with `godot_validate_project` (when available)
+7. Export to web with `godot_export_web`
+8. Serve with `godot_serve_game` so the user can play
+
+## GDScript Style Guide
+
+```gdscript
+# Always use typed variables
+var speed: float = 400.0
+var health: int = 100
+
+# Use @export for inspector properties
+@export var jump_force: float = 400.0
+@export_range(0, 100) var lives: int = 3
+
+# Use signals for communication
+signal died()
+signal collected(points: int)
+
+# Always extend the correct node type
+extends CharacterBody2D  # For moving objects
+extends Node2D          # For 2D scene root
+extends Node            # For autoload/singletons
+
+# Use proper Godot 4.x methods
+func _physics_process(delta: float) -> void:
+    var direction: Vector2 = Input.get_vector("move_left", "move_right", "move_up", "move_down")
+    velocity = direction * speed
+    move_and_slide()
+
+# Signal connections
+func _on_area_entered(area: Area2D) -> void:
+    if area.is_in_group("coins"):
+        collected.emit(10)
+        area.queue_free()
+```
+
+## Common Patterns
+
+### Player Movement (Top-down)
+```gdscript
+extends CharacterBody2D
+
+const SPEED: float = 200.0
+
+func _physics_process(_delta: float) -> void:
+    var input_dir: Vector2 = Input.get_vector("move_left", "move_right", "move_up", "move_down")
+    velocity = input_dir * SPEED
+    move_and_slide()
+```
+
+### Player Movement (Platformer)
+```gdscript
+extends CharacterBody2D
+
+const SPEED: float = 200.0
+const JUMP_FORCE: float = 400.0
+const GRAVITY: float = 1000.0
+
+func _physics_process(delta: float) -> void:
+    # Horizontal movement
+    velocity.x = Input.get_axis("move_left", "move_right") * SPEED
+
+    # Gravity and jump
+    if not is_on_floor():
+        velocity.y += GRAVITY * delta
+    elif Input.is_action_just_pressed("jump"):
+        velocity.y = -JUMP_FORCE
+
+    move_and_slide()
+```
+
+### Collision Detection
+```gdscript
+extends Area2D
+
+signal body_entered_signal(body: Node2D)
+
+func _on_body_entered(body: Node2D) -> void:
+    if body.is_in_group("player"):
+        body.take_damage(10)
+        queue_free()
+```
+
+### UI Labels
+```gdscript
+extends CanvasLayer
+
+@onready var score_label: Label = $ScoreLabel
+
+var score: int = 0
+
+func add_score(points: int) -> void:
+    score += points
+    score_label.text = "Score: %d" % score
+```
+
+## Scene Structure
+
+Always organize scenes properly:
+- Root node with main script
+- Child nodes for game objects
+- CanvasLayer for UI elements
+- Proper node naming (PascalCase)
+
+## Available Templates
+
+- **pong**: Classic two-player pong, first to 5 wins
+- **space_invaders**: Destroy all aliens before they reach you
+- **platformer**: Jump and run, collect coins
+- **shooter**: Top-down survival shooter with waves
+- **puzzle**: Match-3 puzzle game
+
+## Error Handling
+
+If you encounter errors:
+1. Check Godot version compatibility
+2. Verify node types match scripts
+3. Ensure signals are properly connected
+4. Check for typos in method names
+
+Always create playable, complete games that the user can immediately enjoy!"""
+
+
+# Game agent configuration
+GAME_AGENT_CONFIG = AgentConfig(
+    id="game-creator",
+    name="Game Creator",
+    description="Specialized agent for creating complete Godot games from prompts",
+    agent_type=AgentType.CODING,
+    provider="nvidia",  # Use NVIDIA provider (free)
+    model="meta/llama-3.1-8b-instruct",
+    system_prompt=GAME_AGENT_SYSTEM_PROMPT,
+    tools=[
+        # Godot project tools
+        "godot_check_install",
+        "godot_create_project",
+        "godot_create_game",
+        "godot_create_from_template",
+        "godot_list_templates",
+        "godot_build_scene",
+        "godot_add_scene",
+        "godot_add_script",
+        "godot_export_web",
+        "godot_serve_game",
+        # Asset tools
+        "godot_create_sprite",
+        "godot_create_sound",
+        "godot_create_animation",
+        # Debug tools
+        "godot_validate_project",
+        "godot_run_with_output",
+        "godot_preview",
+        "godot_debug_scene",
+        # File tools
+        "file_read",
+        "file_write",
+        "file_list",
+        # Documentation
+        "godot_get_docs",
+    ],
+    memory_enabled=True,
+    max_tokens=4096,
+    temperature=0.7,
+    metadata={
+        "category": "game_development",
+        "specialized": True,
+        "max_tool_iterations": 20,
+    }
+)
+
+
+def create_game_agent(router: LLMRouter) -> Agent:
+    """
+    Create a specialized game development agent.
+
+    Args:
+        router: LLMRouter instance
+
+    Returns:
+        Configured Agent for game development
+    """
+    agent = Agent(GAME_AGENT_CONFIG, router)
+    return agent
+
+
+def register_game_agent(registry: AgentRegistry) -> Agent:
+    """
+    Register the game agent with a registry.
+
+    Args:
+        registry: AgentRegistry instance
+
+    Returns:
+        The registered game agent
+    """
+    agent = create_game_agent(registry.router)
+    registry._agents[agent.config.id] = agent
+    return agent
