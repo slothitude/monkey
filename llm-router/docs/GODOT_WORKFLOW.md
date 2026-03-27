@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Godot AI agent has a complete automated workflow for creating, coding, exporting, and serving Godot 4.x games.
+The Godot AI agent has a complete automated workflow for creating, coding, exporting, serving, and publishing Godot 4.x games.
 
 ## Tools Available
 
@@ -46,13 +46,34 @@ Export to HTML5/WebAssembly:
 ### 7. godot_serve_game(export_path, port)
 Start HTTP server for testing:
 - Default port: 8888
-- Returns URL: http://localhost:8888
+- Auto-finds free port if busy
+- Returns URL: http://localhost:PORT
 
 ### 8. godot_get_docs(topic, version)
 Get Godot documentation URLs:
 - Class reference
 - Tutorials
 - API docs
+
+## itch.io Publishing Tools
+
+### 9. itchio_setup()
+Auto-download and install Butler CLI from GitHub releases.
+- Installs to `~/butler/`
+- Returns path and version
+
+### 10. itchio_login()
+Open browser for OAuth authentication.
+- User completes login in browser
+- Credentials stored in `~/.config/itch/butler_creds`
+
+### 11. itchio_upload(game_path, username, game_slug, channel, version)
+Upload game build to itch.io.
+- Requires Butler installed and logged in
+- Requires game page created manually
+
+### 12. itchio_publish(game_path, username, game_name, channel)
+Complete publishing workflow.
 
 ## Complete Workflow Example
 
@@ -72,6 +93,24 @@ Agent responds:
 "Your Pong game is ready! Play at http://localhost:8888"
 ```
 
+## Publishing to itch.io
+
+```
+User: "Publish this game to itch.io"
+
+Agent executes:
+1. itchio_setup()              # Auto-install Butler
+2. itchio_login()              # Open browser for OAuth
+3. [TELLS USER] "Create game page at https://itch.io/game/new"
+4. [USER CONFIRMS] "Created at https://username.itch.io/game-slug"
+5. itchio_upload("./games/pong/export/html", "username", "game-slug", "html5")
+
+Agent responds:
+"Game published! Play at https://username.itch.io/game-slug"
+```
+
+**IMPORTANT**: Game page must be created manually at https://itch.io/game/new because Cloudflare blocks automated creation.
+
 ## Agent Configuration
 
 ```json
@@ -87,6 +126,10 @@ Agent responds:
     "godot_export_web",
     "godot_serve_game",
     "godot_get_docs",
+    "itchio_setup",
+    "itchio_login",
+    "itchio_upload",
+    "itchio_publish",
     "file_read",
     "file_write",
     "file_list",
@@ -109,6 +152,13 @@ The tools look for Godot in these locations:
 
 **macOS:**
 - /Applications/Godot.app/Contents/MacOS/Godot
+
+## Butler Installation
+
+Butler is auto-installed by `itchio_setup()` to:
+- Windows: `C:/Users/{USERNAME}/butler/windows-amd64/butler.exe`
+- macOS: `~/butler/darwin-amd64/butler`
+- Linux: `~/butler/linux-amd64/butler`
 
 ## GDScript Style Guide (Godot 4.x)
 

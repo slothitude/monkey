@@ -577,10 +577,49 @@ When creating a game:
 2. Use `godot_create_from_template` if a template matches the request (pong, space_invaders, platformer, shooter, puzzle)
 3. For custom games, use `godot_create_project` + `godot_build_scene`
 4. Add scripts with `godot_add_script` using proper GDScript syntax (typed, Godot 4.x)
-5. Create sprites with `godot_create_sprite` and sounds with `godot_create_sound`
+5. For assets, you have two options:
+   - **Kenney.nl assets (RECOMMENDED)**: Use `godot_search_kenney_assets` to find free CC0 asset packs, then `godot_download_kenney_asset` to download them. These are professional-quality assets with no attribution required.
+   - **Generated assets**: Use `godot_create_sprite` and `godot_create_sound` for simple placeholder assets
 6. Validate the project with `godot_validate_project` (when available)
 7. Export to web with `godot_export_web`
 8. Serve with `godot_serve_game` so the user can play
+9. **Publish to itch.io** (optional, if user wants to publish):
+   - Use `itchio_setup` to install Butler CLI (auto-downloads from GitHub)
+   - Use `itchio_login` to authenticate (opens browser for OAuth)
+   - **IMPORTANT**: Tell user to create game page at https://itch.io/game/new manually (Cloudflare blocks automation)
+   - Use `itchio_upload` to upload the game
+
+## Publishing to itch.io
+
+The itch.io workflow requires manual game page creation due to Cloudflare protection:
+
+```
+1. itchio_setup()                    # Auto-installs Butler from GitHub
+2. itchio_login()                    # Browser OAuth (user completes in browser)
+3. [USER] Create game at https://itch.io/game/new
+4. itchio_upload(game_path, username, game_slug, channel="html5")
+```
+
+Returns: https://username.itch.io/game-slug
+
+## Using Kenney.nl Assets
+
+Kenney.nl provides thousands of free CC0 game assets - completely free, no attribution required!
+
+```
+# Search for assets
+godot_search_kenney_assets(query="platformer")
+
+# Download to your project
+godot_download_kenney_asset(
+    project_path="/path/to/game",
+    asset_slug="new-platformer-pack",
+    target_folder="assets/kenney"
+)
+# Returns: res://assets/kenney/new-platformer-pack/
+```
+
+Categories: 2D, 3D, Audio, Textures, UI, Pixel
 
 ## GDScript Style Guide
 
@@ -727,11 +766,21 @@ GAME_AGENT_CONFIG = AgentConfig(
         "godot_create_sprite",
         "godot_create_sound",
         "godot_create_animation",
+        # Kenney.nl asset tools (CC0 free assets)
+        "godot_list_kenney_assets",
+        "godot_search_kenney_assets",
+        "godot_download_kenney_asset",
         # Debug tools
         "godot_validate_project",
         "godot_run_with_output",
         "godot_preview",
         "godot_debug_scene",
+        # itch.io publishing tools
+        "itchio_setup",
+        "itchio_check_butler",
+        "itchio_login",
+        "itchio_upload",
+        "itchio_publish",
         # File tools
         "file_read",
         "file_write",

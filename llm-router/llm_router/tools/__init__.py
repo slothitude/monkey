@@ -115,4 +115,7 @@ def get_tool_registry() -> ToolRegistry:
         # Register AI art tools
         from llm_router.tools.ai_art import register_ai_art_tools
         register_ai_art_tools(_global_registry)
+        # Register itch.io tools
+        from llm_router.tools.itchio_tools import register_itchio_tools
+        register_itchio_tools(_global_registry)
     return _global_registry

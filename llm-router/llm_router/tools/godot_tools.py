@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import socket
 import subprocess
 import shutil
 import uuid
@@ -10,6 +11,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
 from llm_router.tools import ToolDefinition, ToolRegistry
+
+
+def _find_free_port(start_port: int = 8080, max_port: int = 8999) -> int:
+    """Find a free port in the specified range."""
+    for port in range(start_port, max_port + 1):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(('127.0.0.1', port))
+            sock.close()
+            return port
+        except OSError:
+            continue
+    raise RuntimeError(f"No free ports in {start_port}-{max_port}")
 
 
 # Node type templates for scene builder
@@ -899,14 +913,20 @@ def _review_script_file(gd_path: Path, project_dir: Path) -> list:
 
 async def godot_serve_game(
     export_path: str,
-    port: int = 8888
+    port: int = 8888,
+    auto_port: bool = True,
+    start_port: int = 8080,
+    max_port: int = 8999
 ) -> dict:
     """
     Serve a Godot web export via HTTP server.
 
     Args:
         export_path: Path to the exported HTML files
-        port: Port to serve on
+        port: Port to serve on (default 8888)
+        auto_port: If True and requested port is busy, find next free port
+        start_port: Starting port for auto search (default 8080)
+        max_port: Maximum port for auto search (default 8999)
 
     Returns:
         Dict with server info or error
@@ -920,24 +940,26 @@ async def godot_serve_game(
             return {"error": "index.html not found in export directory"}
 
         # Start HTTP server in background
-        import socket
         import threading
         import http.server
 
-        # Check if port is available
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', port))
-        sock.close()
-        if result == 0:
-            return {"error": f"Port {port} is already in use", "port": port}
-
-        os.chdir(export_dir)
+        # Check if port is available, find free port if needed
+        actual_port = port
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.bind(('127.0.0.1', port))
+            test_sock.close()
+        except OSError:
+            if auto_port:
+                actual_port = _find_free_port(start_port, max_port)
+            else:
+                return {"error": f"Port {port} is already in use", "port": port, "suggestion": "Set auto_port=True to find a free port automatically"}
 
         class Handler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(export_dir), **kwargs)
 
-        server = http.server.HTTPServer(('127.0.0.1', port), Handler)
+        server = http.server.HTTPServer(('127.0.0.1', actual_port), Handler)
 
         # Run in background thread
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -945,8 +967,10 @@ async def godot_serve_game(
 
         return {
             "success": True,
-            "url": f"http://localhost:{port}",
-            "port": port,
+            "url": f"http://localhost:{actual_port}",
+            "port": actual_port,
+            "requested_port": port,
+            "port_changed": actual_port != port,
             "export_path": str(export_dir),
         }
 
@@ -1044,7 +1068,10 @@ async def godot_create_game(
     project_path: str,
     game_name: str,
     game_type: str,
-    description: str = ""
+    description: str = "",
+    itchio_publish: bool = False,
+    itchio_username: str = "",
+    itchio_game_slug: str = ""
 ) -> dict:
     """
     Create a complete Godot game from a template.
@@ -1056,6 +1083,9 @@ async def godot_create_game(
         game_name: Name of the game
         game_type: Type of game (pong, space_invaders, platformer, shooter, puzzle)
         description: Additional description of the game
+        itchio_publish: If True, export to web and upload to itch.io
+        itchio_username: itch.io username (required if itchio_publish=True)
+        itchio_game_slug: Game URL slug (optional, defaults to game_name lowercased)
 
     Returns:
         Dict with project info and created files
@@ -1085,7 +1115,7 @@ async def godot_create_game(
             if template.project_settings:
                 _update_project_settings(project_dir, template.project_settings)
 
-            return {
+            base_result = {
                 "success": True,
                 "project_path": str(project_dir),
                 "game_name": game_name,
@@ -1103,7 +1133,7 @@ async def godot_create_game(
 
             files_created = _create_basic_template(project_dir, game_name, description, game_type)
 
-            return {
+            base_result = {
                 "success": True,
                 "project_path": str(project_dir),
                 "game_name": game_name,
@@ -1111,6 +1141,43 @@ async def godot_create_game(
                 "files_created": files_created,
                 "message": f"Created basic {game_type} game '{game_name}' with {len(files_created)} files",
             }
+
+        # Handle itch.io publishing if requested
+        if itchio_publish:
+            if not itchio_username:
+                base_result["itchio_error"] = "itchio_username is required when itchio_publish=True"
+                return base_result
+
+            # Determine game slug
+            game_slug = itchio_game_slug or game_name.lower().replace(" ", "-").replace("_", "-")
+
+            # Export to web first
+            export_result = await godot_export_web(str(project_dir))
+            if "error" in export_result:
+                base_result["itchio_error"] = f"Web export failed: {export_result['error']}"
+                return base_result
+
+            export_path = export_result.get("export_path", str(project_dir / "web-export"))
+
+            # Upload to itch.io
+            from llm_router.tools.itchio_tools import itchio_upload
+            upload_result = await itchio_upload(
+                game_path=export_path,
+                username=itchio_username,
+                game_slug=game_slug,
+                channel="html5"
+            )
+
+            if upload_result.get("success"):
+                base_result["itchio_published"] = True
+                base_result["itchio_url"] = upload_result["url"]
+                base_result["itchio_channel"] = "html5"
+                base_result["message"] += f" and published to {upload_result['url']}"
+            else:
+                base_result["itchio_published"] = False
+                base_result["itchio_error"] = upload_result.get("error", "Unknown upload error")
+
+        return base_result
 
     except Exception as e:
         return {"error": str(e), "project_path": project_path}
@@ -1120,7 +1187,10 @@ async def godot_create_from_template(
     project_path: str,
     template_name: str,
     game_name: str,
-    customizations: Optional[dict] = None
+    customizations: Optional[dict] = None,
+    itchio_publish: bool = False,
+    itchio_username: str = "",
+    itchio_game_slug: str = ""
 ) -> dict:
     """
     Create a complete game from a named template with optional customizations.
@@ -1132,6 +1202,9 @@ async def godot_create_from_template(
         template_name: Name of the template to use
         game_name: Name for the game
         customizations: Optional customizations (colors, speed, difficulty, etc.)
+        itchio_publish: If True, export to web and upload to itch.io
+        itchio_username: itch.io username (required if itchio_publish=True)
+        itchio_game_slug: Game URL slug (optional, defaults to game_name lowercased)
 
     Returns:
         Dict with project info and created files
@@ -1170,7 +1243,7 @@ async def godot_create_from_template(
         # Review the generated game for issues
         review_result = await godot_review_game(str(project_dir))
 
-        return {
+        base_result = {
             "success": True,
             "project_path": str(project_dir),
             "game_name": game_name,
@@ -1184,6 +1257,43 @@ async def godot_create_from_template(
             "has_issues": review_result.get("issue_count", 0) > 0,
             "message": f"Created {template.name} game '{game_name}' from template",
         }
+
+        # Handle itch.io publishing if requested
+        if itchio_publish:
+            if not itchio_username:
+                base_result["itchio_error"] = "itchio_username is required when itchio_publish=True"
+                return base_result
+
+            # Determine game slug
+            game_slug = itchio_game_slug or game_name.lower().replace(" ", "-").replace("_", "-")
+
+            # Export to web first
+            export_result = await godot_export_web(str(project_dir))
+            if "error" in export_result:
+                base_result["itchio_error"] = f"Web export failed: {export_result['error']}"
+                return base_result
+
+            export_path = export_result.get("export_path", str(project_dir / "web-export"))
+
+            # Upload to itch.io
+            from llm_router.tools.itchio_tools import itchio_upload
+            upload_result = await itchio_upload(
+                game_path=export_path,
+                username=itchio_username,
+                game_slug=game_slug,
+                channel="html5"
+            )
+
+            if upload_result.get("success"):
+                base_result["itchio_published"] = True
+                base_result["itchio_url"] = upload_result["url"]
+                base_result["itchio_channel"] = "html5"
+                base_result["message"] += f" and published to {upload_result['url']}"
+            else:
+                base_result["itchio_published"] = False
+                base_result["itchio_error"] = upload_result.get("error", "Unknown upload error")
+
+        return base_result
 
     except Exception as e:
         return {"error": str(e)}
@@ -1438,12 +1548,15 @@ GODOT_EXPORT_WEB_DEF = ToolDefinition(
 
 GODOT_SERVE_GAME_DEF = ToolDefinition(
     name="godot_serve_game",
-    description="Serve a Godot web export via local HTTP server for testing.",
+    description="Serve a Godot web export via local HTTP server for testing. Automatically finds a free port if the requested one is busy.",
     parameters={
         "type": "object",
         "properties": {
             "export_path": {"type": "string", "description": "Path to the exported HTML files"},
             "port": {"type": "integer", "description": "Port to serve on", "default": 8888},
+            "auto_port": {"type": "boolean", "description": "If true and port is busy, find next free port", "default": True},
+            "start_port": {"type": "integer", "description": "Starting port for auto search", "default": 8080},
+            "max_port": {"type": "integer", "description": "Maximum port for auto search", "default": 8999},
         },
         "required": ["export_path"],
     },
@@ -1481,7 +1594,8 @@ GODOT_CREATE_GAME_DEF = ToolDefinition(
     name="godot_create_game",
     description="""Create a complete, playable Godot game from a template.
 Available templates: pong, space_invaders, platformer, shooter, puzzle.
-Each template includes full scene files, scripts, UI, and input mappings.""",
+Each template includes full scene files, scripts, UI, and input mappings.
+Set itchio_publish=True to automatically export and upload to itch.io.""",
     parameters={
         "type": "object",
         "properties": {
@@ -1489,6 +1603,9 @@ Each template includes full scene files, scripts, UI, and input mappings.""",
             "game_name": {"type": "string", "description": "Name of the game"},
             "game_type": {"type": "string", "description": "Type: pong, space_invaders, platformer, shooter, puzzle"},
             "description": {"type": "string", "description": "Description of the game (optional)"},
+            "itchio_publish": {"type": "boolean", "description": "If true, export and upload to itch.io", "default": False},
+            "itchio_username": {"type": "string", "description": "itch.io username (required if itchio_publish=True)"},
+            "itchio_game_slug": {"type": "string", "description": "Game URL slug (optional, defaults to game_name)"},
         },
         "required": ["project_path", "game_name", "game_type"],
     },
@@ -1499,7 +1616,8 @@ Each template includes full scene files, scripts, UI, and input mappings.""",
 GODOT_CREATE_FROM_TEMPLATE_DEF = ToolDefinition(
     name="godot_create_from_template",
     description="""Create a complete game from a named template with optional customizations.
-Templates include full game logic, scenes, scripts, and UI.""",
+Templates include full game logic, scenes, scripts, and UI.
+Set itchio_publish=True to automatically export and upload to itch.io.""",
     parameters={
         "type": "object",
         "properties": {
@@ -1514,7 +1632,10 @@ Templates include full game logic, scenes, scripts, and UI.""",
                     "speed": {"type": "number", "description": "Game speed multiplier"},
                     "difficulty": {"type": "string", "description": "easy, medium, hard"}
                 }
-            }
+            },
+            "itchio_publish": {"type": "boolean", "description": "If true, export and upload to itch.io", "default": False},
+            "itchio_username": {"type": "string", "description": "itch.io username (required if itchio_publish=True)"},
+            "itchio_game_slug": {"type": "string", "description": "Game URL slug (optional, defaults to game_name)"},
         },
         "required": ["project_path", "template_name", "game_name"],
     },
