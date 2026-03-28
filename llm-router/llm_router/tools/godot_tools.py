@@ -1986,6 +1986,441 @@ GODOT_PLAY_GAME_DEF = ToolDefinition(
 )
 
 
+# =============================================================================
+# BLENDER INTEGRATION TOOLS
+# =============================================================================
+
+BLENDER_HOST = "127.0.0.1"
+BLENDER_PORT = 9876
+
+
+def _blender_send_command(cmd_type: str, params: dict = None, timeout: float = 10.0) -> dict:
+    """Send a command to Blender MCP addon and return the response."""
+    import socket
+    import time
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect((BLENDER_HOST, BLENDER_PORT))
+
+        cmd = json.dumps({"type": cmd_type, "params": params or {}})
+        sock.sendall((cmd + "\n").encode())
+        time.sleep(0.3)
+
+        sock.setblocking(False)
+        response = b""
+        try:
+            while True:
+                try:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+                except BlockingIOError:
+                    break
+        except Exception:
+            pass
+
+        if response:
+            return json.loads(response.decode())
+        return {"status": "error", "message": "No response from Blender"}
+    except socket.error as e:
+        return {"status": "error", "message": f"Cannot connect to Blender: {e}. Make sure Blender is running with MCP addon enabled."}
+    finally:
+        sock.close()
+
+
+def blender_get_scene_info() -> dict:
+    """Get information about the current Blender scene."""
+    result = _blender_send_command("get_scene_info")
+    if result.get("status") == "success":
+        return result.get("result", {})
+    return {"error": result.get("message", "Unknown error")}
+
+
+def blender_execute_code(code: str) -> dict:
+    """Execute arbitrary Python code in Blender."""
+    result = _blender_send_command("execute_code", {"code": code}, timeout=30.0)
+    if result.get("status") == "success":
+        return result.get("result", {})
+    return {"error": result.get("message", "Unknown error")}
+
+
+def blender_create_object(
+    object_type: str = "CUBE",
+    name: str = None,
+    location: list = None,
+    rotation: list = None,
+    scale: list = None,
+) -> dict:
+    """Create a 3D object in Blender.
+
+    Args:
+        object_type: Type of object - CUBE, SPHERE, CYLINDER, CONE, TORUS, PLANE, MONKEY
+        name: Optional name for the object
+        location: [x, y, z] position
+        rotation: [x, y, z] rotation in degrees
+        scale: [x, y, z] scale factors
+    """
+    location = location or [0, 0, 0]
+    rotation = rotation or [0, 0, 0]
+    scale = scale or [1, 1, 1]
+
+    type_map = {
+        "CUBE": "primitive_cube_add",
+        "SPHERE": "primitive_uv_sphere_add",
+        "CYLINDER": "primitive_cylinder_add",
+        "CONE": "primitive_cone_add",
+        "TORUS": "primitive_torus_add",
+        "PLANE": "primitive_plane_add",
+        "MONKEY": "primitive_monkey_add",
+    }
+
+    op_name = type_map.get(object_type.upper(), "primitive_cube_add")
+
+    code = f"""
+import bpy
+from math import radians
+
+bpy.ops.mesh.{op_name}()
+obj = bpy.context.active_object
+"""
+
+    if name:
+        code += f'obj.name = "{name}"\n'
+
+    code += f"""
+obj.location = ({location[0]}, {location[1]}, {location[2]})
+obj.rotation_euler = (radians({rotation[0]}), radians({rotation[1]}), radians({rotation[2]}))
+obj.scale = ({scale[0]}, {scale[1]}, {scale[2]})
+print(f"Created {{obj.name}} at {{obj.location}}")
+"""
+
+    return blender_execute_code(code)
+
+
+def blender_create_material(
+    object_name: str,
+    material_name: str = "CustomMaterial",
+    base_color: list = None,
+    emission_color: list = None,
+    emission_strength: float = 0.0,
+    metallic: float = 0.0,
+    roughness: float = 0.5,
+    material_type: str = "principled",
+) -> dict:
+    """Create and apply a material to an object in Blender.
+
+    Args:
+        object_name: Name of the object to apply material to
+        material_name: Name for the new material
+        base_color: [r, g, b] base color (0-1 range)
+        emission_color: [r, g, b] emission color (0-1 range)
+        emission_strength: Emission strength (0-10)
+        metallic: Metallic value (0-1)
+        roughness: Roughness value (0-1)
+        material_type: Type - principled, sci_fi, glow, metallic
+    """
+    base_color = base_color or [0.5, 0.5, 0.5]
+    emission_color = emission_color or base_color
+
+    if material_type == "sci_fi":
+        code = f"""
+import bpy
+
+mat = bpy.data.materials.new(name="{material_name}")
+mat.use_nodes = True
+nodes = mat.node_tree.nodes
+links = mat.node_tree.links
+nodes.clear()
+
+output = nodes.new(type="ShaderNodeOutputMaterial")
+output.location = (600, 0)
+
+principled = nodes.new(type="ShaderNodeBsdfPrincipled")
+principled.location = (300, 0)
+
+noise = nodes.new(type="ShaderNodeTexNoise")
+noise.inputs["Scale"].default_value = 8.0
+noise.inputs["Detail"].default_value = 16.0
+noise.inputs["Distortion"].default_value = 2.0
+noise.location = (-400, 200)
+
+voronoi = nodes.new(type="ShaderNodeTexVoronoi")
+voronoi.inputs["Scale"].default_value = 4.0
+voronoi.location = (-400, -100)
+
+ramp1 = nodes.new(type="ShaderNodeValToRGB")
+ramp1.location = (-100, 200)
+ramp1.color_ramp.elements[0].color = ({base_color[0]*0.1}, {base_color[1]*0.2}, {base_color[2]*0.4}, 1)
+ramp1.color_ramp.elements[1].color = ({base_color[0]}, {base_color[1]}, {base_color[2]}, 1)
+
+ramp2 = nodes.new(type="ShaderNodeValToRGB")
+ramp2.location = (-100, -100)
+ramp2.color_ramp.elements[0].color = (0, 0, 0, 1)
+ramp2.color_ramp.elements[1].color = ({emission_color[0]}, {emission_color[1]}, {emission_color[2]}, 1)
+
+mix = nodes.new(type="ShaderNodeMixRGB")
+mix.location = (100, 0)
+
+bump = nodes.new(type="ShaderNodeBump")
+bump.inputs["Strength"].default_value = 0.3
+bump.location = (100, -300)
+
+links.new(noise.outputs["Fac"], ramp1.inputs["Fac"])
+links.new(voronoi.outputs["Distance"], ramp2.inputs["Fac"])
+links.new(ramp1.outputs["Color"], mix.inputs["Color1"])
+links.new(ramp2.outputs["Color"], mix.inputs["Color2"])
+links.new(mix.outputs["Color"], principled.inputs["Base Color"])
+links.new(mix.outputs["Color"], principled.inputs["Emission Color"])
+links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+links.new(noise.outputs["Fac"], bump.inputs["Height"])
+links.new(bump.outputs["Normal"], principled.inputs["Normal"])
+
+principled.inputs["Emission Strength"].default_value = {emission_strength}
+principled.inputs["Roughness"].default_value = {roughness}
+principled.inputs["Metallic"].default_value = {metallic}
+
+obj = bpy.data.objects.get("{object_name}")
+if obj:
+    if obj.data.materials:
+        obj.data.materials[0] = mat
+    else:
+        obj.data.materials.append(mat)
+    print(f"Applied {{mat.name}} to {{obj.name}}")
+else:
+    print(f"Object {object_name} not found")
+"""
+    else:
+        # Simple principled material
+        code = f"""
+import bpy
+
+mat = bpy.data.materials.new(name="{material_name}")
+mat.use_nodes = True
+nodes = mat.node_tree.nodes
+
+principled = nodes.get("Principled BSDF")
+if principled:
+    principled.inputs["Base Color"].default_value = ({base_color[0]}, {base_color[1]}, {base_color[2]}, 1)
+    principled.inputs["Metallic"].default_value = {metallic}
+    principled.inputs["Roughness"].default_value = {roughness}
+    principled.inputs["Emission Color"].default_value = ({emission_color[0]}, {emission_color[1]}, {emission_color[2]}, 1)
+    principled.inputs["Emission Strength"].default_value = {emission_strength}
+
+obj = bpy.data.objects.get("{object_name}")
+if obj:
+    if obj.data.materials:
+        obj.data.materials[0] = mat
+    else:
+        obj.data.materials.append(mat)
+    print(f"Applied {{mat.name}} to {{obj.name}}")
+else:
+    print(f"Object {object_name} not found")
+"""
+
+    return blender_execute_code(code)
+
+
+def blender_export_gltf(
+    output_path: str,
+    object_names: list = None,
+    export_format: str = "GLB",
+) -> dict:
+    """Export Blender objects to glTF format for use in Godot.
+
+    Args:
+        output_path: Path to save the glTF file (relative to project or absolute)
+        object_names: List of object names to export (None = export all)
+        export_format: GLB (binary, recommended) or GLTF (separate files)
+    """
+    # Ensure output path is absolute
+    if not os.path.isabs(output_path):
+        output_path = os.path.abspath(output_path)
+
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    code = f"""
+import bpy
+
+# Select objects to export
+bpy.ops.object.select_all(action='DESELECT')
+"""
+
+    if object_names:
+        for name in object_names:
+            code += f"""
+obj = bpy.data.objects.get("{name}")
+if obj:
+    obj.select_set(True)
+"""
+    else:
+        code += """
+for obj in bpy.data.objects:
+    if obj.type in ['MESH', 'ARMATURE']:
+        obj.select_set(True)
+"""
+
+    code += f"""
+# Export to glTF
+bpy.ops.export_scene.gltf(
+    filepath=r"{output_path}",
+    export_format='{export_format}',
+    use_selection={'True' if object_names else 'False'},
+    export_apply=True,
+    export_texcoords=True,
+    export_normals=True,
+    export_cameras=False,
+    export_lights=False,
+)
+print(f"Exported to {output_path}")
+"""
+
+    result = blender_execute_code(code)
+    if "error" not in result:
+        result["output_path"] = output_path
+    return result
+
+
+def blender_delete_object(object_name: str) -> dict:
+    """Delete an object from the Blender scene."""
+    code = f"""
+import bpy
+obj = bpy.data.objects.get("{object_name}")
+if obj:
+    bpy.data.objects.remove(obj, do_unlink=True)
+    print(f"Deleted {object_name}")
+else:
+    print(f"Object {object_name} not found")
+"""
+    return blender_execute_code(code)
+
+
+def blender_screenshot(filepath: str = None) -> dict:
+    """Take a screenshot of the Blender viewport."""
+    if filepath is None:
+        filepath = os.path.join(os.getcwd(), "blender_screenshot.png")
+
+    result = _blender_send_command("get_viewport_screenshot", {"filepath": filepath})
+    if result.get("status") == "success":
+        return {"success": True, "filepath": filepath, **result.get("result", {})}
+    return {"error": result.get("message", "Unknown error")}
+
+
+# Tool Definitions for Blender
+
+BLENDER_GET_SCENE_DEF = ToolDefinition(
+    name="blender_get_scene",
+    description="Get information about the current Blender scene including objects, materials, and settings. Use to check what's in the scene before making changes.",
+    parameters={
+        "type": "object",
+        "required": [],
+        "properties": {},
+    },
+    function=blender_get_scene_info,
+    category="blender",
+)
+
+BLENDER_EXECUTE_DEF = ToolDefinition(
+    name="blender_execute",
+    description="Execute arbitrary Python code in Blender. Use for custom operations not covered by other tools. Requires Blender to be running with MCP addon connected.",
+    parameters={
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+            "code": {"type": "string", "description": "Python code to execute in Blender context (bpy module available)"},
+        },
+    },
+    function=blender_execute_code,
+    category="blender",
+)
+
+BLENDER_CREATE_OBJECT_DEF = ToolDefinition(
+    name="blender_create_object",
+    description="Create a 3D object in Blender. Supports CUBE, SPHERE, CYLINDER, CONE, TORUS, PLANE, MONKEY (Suzanne). Can set position, rotation, and scale.",
+    parameters={
+        "type": "object",
+        "required": ["object_type"],
+        "properties": {
+            "object_type": {"type": "string", "description": "Type: CUBE, SPHERE, CYLINDER, CONE, TORUS, PLANE, MONKEY", "enum": ["CUBE", "SPHERE", "CYLINDER", "CONE", "TORUS", "PLANE", "MONKEY"]},
+            "name": {"type": "string", "description": "Name for the object"},
+            "location": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] position"},
+            "rotation": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] rotation in degrees"},
+            "scale": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] scale factors"},
+        },
+    },
+    function=blender_create_object,
+    category="blender",
+)
+
+BLENDER_CREATE_MATERIAL_DEF = ToolDefinition(
+    name="blender_create_material",
+    description="Create and apply a material to an object in Blender. Supports simple principled materials or procedural sci-fi textures with emission glow.",
+    parameters={
+        "type": "object",
+        "required": ["object_name"],
+        "properties": {
+            "object_name": {"type": "string", "description": "Name of the object to apply material to"},
+            "material_name": {"type": "string", "description": "Name for the new material"},
+            "base_color": {"type": "array", "items": {"type": "number"}, "description": "[r, g, b] base color (0-1 range)"},
+            "emission_color": {"type": "array", "items": {"type": "number"}, "description": "[r, g, b] emission/glow color (0-1 range)"},
+            "emission_strength": {"type": "number", "description": "Emission strength (0-10)"},
+            "metallic": {"type": "number", "description": "Metallic value (0-1)"},
+            "roughness": {"type": "number", "description": "Roughness value (0-1)"},
+            "material_type": {"type": "string", "description": "Material type: principled (simple), sci_fi (procedural glow)", "enum": ["principled", "sci_fi"]},
+        },
+    },
+    function=blender_create_material,
+    category="blender",
+)
+
+BLENDER_EXPORT_GLTF_DEF = ToolDefinition(
+    name="blender_export_gltf",
+    description="Export Blender objects to glTF format (.glb or .gltf) for use in Godot. GLB is recommended for single-file exports.",
+    parameters={
+        "type": "object",
+        "required": ["output_path"],
+        "properties": {
+            "output_path": {"type": "string", "description": "Path to save the glTF file (e.g., models/character.glb)"},
+            "object_names": {"type": "array", "items": {"type": "string"}, "description": "List of object names to export (omit to export all)"},
+            "export_format": {"type": "string", "description": "GLB (binary, recommended) or GLTF (separate files)", "enum": ["GLB", "GLTF"]},
+        },
+    },
+    function=blender_export_gltf,
+    category="blender",
+)
+
+BLENDER_DELETE_OBJECT_DEF = ToolDefinition(
+    name="blender_delete_object",
+    description="Delete an object from the Blender scene.",
+    parameters={
+        "type": "object",
+        "required": ["object_name"],
+        "properties": {
+            "object_name": {"type": "string", "description": "Name of the object to delete"},
+        },
+    },
+    function=blender_delete_object,
+    category="blender",
+)
+
+BLENDER_SCREENSHOT_DEF = ToolDefinition(
+    name="blender_screenshot",
+    description="Take a screenshot of the Blender viewport to see current state.",
+    parameters={
+        "type": "object",
+        "required": [],
+        "properties": {
+            "filepath": {"type": "string", "description": "Path to save screenshot (default: blender_screenshot.png)"},
+        },
+    },
+    function=blender_screenshot,
+    category="blender",
+)
+
+
 def register_godot_tools(registry: ToolRegistry) -> None:
     """Register all Godot tools with a registry."""
     registry.register(GODOT_CREATE_PROJECT_DEF)
@@ -2001,3 +2436,11 @@ def register_godot_tools(registry: ToolRegistry) -> None:
     registry.register(GODOT_LIST_TEMPLATES_DEF)
     registry.register(GODOT_REVIEW_GAME_DEF)
     registry.register(GODOT_PLAY_GAME_DEF)
+    # Blender tools
+    registry.register(BLENDER_GET_SCENE_DEF)
+    registry.register(BLENDER_EXECUTE_DEF)
+    registry.register(BLENDER_CREATE_OBJECT_DEF)
+    registry.register(BLENDER_CREATE_MATERIAL_DEF)
+    registry.register(BLENDER_EXPORT_GLTF_DEF)
+    registry.register(BLENDER_DELETE_OBJECT_DEF)
+    registry.register(BLENDER_SCREENSHOT_DEF)
