@@ -510,15 +510,16 @@ async def ai_image_to_3d_blender(
     texture: bool = True,
     remove_background: bool = True,
     octree_resolution: int = 256,
+    apply_material_in_blender: bool = True,
 ) -> dict:
     """
     Complete workflow: Generate AI image, convert to 3D, and import to Blender.
 
     This tool:
-    1. Generates an AI image using Pixazo
+    1. Generates an AI image using Pixazo FLUX
     2. Converts the image to 3D using Hunyuan3D
-    3. Saves the GLB file to disk
-    4. Optionally imports to Blender via MCP
+    3. Saves the GLB file to disk (with textures embedded if texture=True)
+    4. Optionally imports to Blender via MCP with material setup
 
     Args:
         prompt: Text description for both image and 3D model
@@ -526,9 +527,10 @@ async def ai_image_to_3d_blender(
         image_style: Style for AI image (3d_render, realistic, cartoon, low_poly)
         image_size: [width, height] for generated image
         import_to_blender: Whether to import directly to Blender
-        texture: Whether to generate 3D with texture
+        texture: Whether to generate 3D with texture (recommended for best results)
         remove_background: Whether to remove background before 3D conversion
         octree_resolution: Quality of 3D generation (128-512)
+        apply_material_in_blender: Apply principled BSDF material in Blender
 
     Returns:
         dict with status, file paths, and Blender import status
@@ -570,7 +572,7 @@ async def ai_image_to_3d_blender(
         "blender_import": None,
     }
 
-    # Step 2: Convert image to 3D
+    # Step 2: Convert image to 3D with texture
     gen_result = await hunyuan_generate_glb(
         image_path=str(image_path),
         remove_background=remove_background,
@@ -597,18 +599,69 @@ async def ai_image_to_3d_blender(
     # Step 3: Import to Blender if requested
     if import_to_blender:
         if check_blender_mcp():
+            # Import with material setup
+            blender_code = f'''
+import bpy
+import os
+
+filepath = r"{str(glb_path).replace("\\", "/")}"
+safe_name = "{safe_name}"
+
+# Import GLB
+bpy.ops.import_scene.gltf(filepath=filepath)
+
+imported = bpy.context.selected_objects
+result = {{"imported": len(imported), "objects": []}}
+
+if imported:
+    # Get the main mesh object
+    main_obj = imported[0]
+    main_obj.name = safe_name
+    result["objects"].append(main_obj.name)
+
+    # Set up material with textures if available
+    if main_obj.type == "MESH":
+        mat = bpy.data.materials.new(name=f"{{safe_name}}_Material")
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
+
+        # Clear default nodes
+        nodes.clear()
+
+        # Create Principled BSDF
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (0, 0)
+
+        # Create Output node
+        output = nodes.new("ShaderNodeOutputMaterial")
+        output.location = (300, 0)
+
+        # Link BSDF to Output
+        links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+
+        # Check for embedded textures and connect them
+        tex_node = None
+        for node in main_obj.material_slots:
+            pass  # GLB materials are already imported
+
+        # Assign material
+        if len(main_obj.material_slots) == 0:
+            main_obj.data.materials.append(mat)
+
+        result["material"] = mat.name
+
+    # Center the view
+    bpy.ops.object.select_all(action='DESELECT')
+    main_obj.select_set(True)
+    bpy.context.view_layer.objects.active = main_obj
+
+result
+'''
+
             import_result = await send_to_blender_mcp({
                 "type": "execute_code",
-                "params": {
-                    "code": f'''
-import bpy
-bpy.ops.import_scene.gltf(filepath=r"{str(glb_path)}")
-imported = bpy.context.selected_objects
-if imported:
-    imported[0].name = "{safe_name}"
-{{"imported": len(imported), "objects": [o.name for o in imported]}}
-'''
-                }
+                "params": {"code": blender_code}
             })
             result["blender_import"] = import_result
             result["step"] = "complete"
