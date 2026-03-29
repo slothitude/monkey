@@ -770,6 +770,15 @@ GAME_AGENT_CONFIG = AgentConfig(
         "godot_list_kenney_assets",
         "godot_search_kenney_assets",
         "godot_download_kenney_asset",
+        # AI tile generation workflow tools
+        "godot_generate_sprite_alpha",
+        "godot_generate_tileset_ai",
+        "godot_analyze_tile_needs",
+        "godot_create_tile",
+        "godot_create_mario_brick",
+        "godot_create_tileset",
+        "godot_create_sprite_frames",
+        "godot_generate_animated_character",
         # Debug tools
         "godot_validate_project",
         "godot_run_with_output",

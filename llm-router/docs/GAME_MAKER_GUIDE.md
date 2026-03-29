@@ -363,6 +363,173 @@ result = await generate_music_ai(
 
 ---
 
+## Tile Generation Workflow
+
+A complete workflow for generating 2D game tiles with AI, including transparency handling, seamless tiling, and Godot resource creation.
+
+### 1. Analyze Tile Needs
+
+```python
+from llm_router.tools.ai_art import analyze_tile_needs
+
+# Analyze what tiles are needed for a game
+manifest = analyze_tile_needs({
+    "game_type": "platformer",
+    "environment": "forest",
+    "characters": ["player", "enemy"],
+    "objects": ["coin", "heart"],
+    "style": "pixel_art_32"
+})
+
+print(f"Background tiles: {manifest['background_tiles']}")
+print(f"Decorations: {manifest['decoration_tiles']}")
+print(f"Characters: {manifest['characters']}")
+```
+
+### 2. Generate Sprites with Alpha
+
+```python
+from llm_router.tools.ai_art import generate_sprite_with_alpha
+
+# Generate a single sprite with clean transparency
+result = await generate_sprite_with_alpha(
+    project_path="./games/my_game",
+    sprite_name="player_idle",
+    sprite_config={
+        "prompt": "fantasy knight character, front facing",
+        "size": [32, 32],
+        "style": "pixel_art_32",
+        "remove_bg": True,  # Remove white background
+        "seamless": False,
+        "seed": 42
+    }
+)
+```
+
+### 3. Generate Complete Tileset
+
+```python
+from llm_router.tools.ai_art import generate_tileset_ai
+
+# Generate a themed tileset
+result = await generate_tileset_ai(
+    project_path="./games/my_game",
+    tileset_name="forest_tiles",
+    tileset_config={
+        "style": "pixel_art_32",
+        "theme": "forest",
+        "seed": 42,
+        "seamless": True
+    }
+)
+
+# Generated tiles are in: assets/tiles/forest_tiles/
+```
+
+### 4. Generate Animated Character
+
+```python
+from llm_router.tools.godot_assets import generate_animated_character
+
+# Generate a complete animated character
+result = await generate_animated_character(
+    project_path="./games/my_game",
+    character_name="hero",
+    character_config={
+        "prompt": "fantasy knight in golden armor",
+        "animations": [
+            {"name": "idle", "frame_count": 4, "speed": 5.0, "loop": True},
+            {"name": "walk", "frame_count": 6, "speed": 10.0, "loop": True},
+            {"name": "jump", "frame_count": 2, "speed": 8.0, "loop": False}
+        ],
+        "style": "pixel_art_32",
+        "size": [32, 32],
+        "seed": 42
+    }
+)
+
+# Creates:
+# - Individual sprite frames in assets/characters/hero/
+# - Sprite sheet: assets/characters/hero/hero_spritesheet.png
+# - Godot SpriteFrames: assets/animations/hero_frames.tres
+```
+
+### 5. Create TileSet Resource
+
+```python
+from llm_router.tools.godot_assets import create_tileset_resource
+
+# Create a Godot TileSet resource
+result = create_tileset_resource(
+    project_path="./games/my_game",
+    tileset_name="forest_tileset",
+    tiles=[
+        {"name": "grass", "texture_path": "res://assets/tiles/forest/grass.png"},
+        {"name": "dirt", "texture_path": "res://assets/tiles/forest/dirt.png"},
+        {"name": "stone", "texture_path": "res://assets/tiles/forest/stone.png", "shape": "rectangle"}
+    ],
+    tile_size=[32, 32]
+)
+
+# Use in Godot: load TileSet in TileMap node
+```
+
+### 6. Create SpriteFrames Resource
+
+```python
+from llm_router.tools.godot_assets import create_sprite_frames_resource
+
+# Create SpriteFrames for AnimatedSprite2D
+result = create_sprite_frames_resource(
+    project_path="./games/my_game",
+    frames_name="player",
+    animations=[
+        {
+            "name": "idle",
+            "frames": [
+                "res://assets/characters/player/idle_00.png",
+                "res://assets/characters/player/idle_01.png",
+                "res://assets/characters/player/idle_02.png"
+            ],
+            "speed": 5.0,
+            "loop": True
+        },
+        {
+            "name": "walk",
+            "frames": [
+                "res://assets/characters/player/walk_00.png",
+                "res://assets/characters/player/walk_01.png"
+            ],
+            "speed": 10.0,
+            "loop": True
+        }
+    ]
+)
+
+# Use in Godot: assign to AnimatedSprite2D's frames property
+```
+
+### Available Themes
+
+| Theme | Background Tiles | Decorations | Objects |
+|-------|-----------------|-------------|----------|
+| platformer | ground, grass, dirt, stone, wood_platform | bush, flower, rock, mushroom | coin, heart, star |
+| dungeon | floor_stone, wall_stone, wall_brick, door, stairs | torch, chest, bones, cobweb | key, gem, potion |
+| forest | grass, path, water, bridge, leaves_ground | tree, bush, flower, log, mushroom | acorn, berry, feather |
+| desert | sand, sandstone, brick_adobe, cave_entrance | cactus, skull, tumbleweed, palm_tree | gem_ruby, scroll, lamp |
+| ice | ice_floor, snow, ice_wall, frozen_water | icicle, snowman, pine_tree, crystal | gem_diamond, frozen_heart, snowflake |
+
+### Available Styles
+
+| Style | Size | Description |
+|-------|------|-------------|
+| pixel_art_16 | 16x16 | 16-bit pixel art, 4-8 colors, clean edges |
+| pixel_art_32 | 32x32 | 32-bit pixel art, limited palette, clean edges |
+| cartoon | 64x64 | Bold outlines, flat colors, game asset |
+| realistic | 128x128 | Detailed, high quality texture |
+
+---
+
 ## Debugging
 
 ### Validate Project
