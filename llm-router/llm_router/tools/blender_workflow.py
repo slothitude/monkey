@@ -392,12 +392,226 @@ async def hunyuan_status() -> dict:
             "url": HUNYUAN_API_URL,
             "message": f"Error checking server: {str(e)}"
         }
+
+
+# AI Image Generation Configuration
+PIXAZO_API_URL = os.environ.get("PIXAZO_API_URL", "https://api.pixazo.ai")
+PIXAZO_API_KEY = os.environ.get("PIXAZO_API_KEY", "")
+
+
+async def generate_ai_image(
+    prompt: str,
+    size: list = [512, 512],
+    style: str = "3d_render",
+    output_path: Optional[str] = None,
+) -> dict:
+    """
+    Generate an AI image using Pixazo API.
+
+    Args:
+        prompt: Text description of the image
+        size: [width, height] for the image
+        style: Style preset (3d_render, realistic, cartoon, etc.)
+        output_path: Optional path to save the image
+
+    Returns:
+        dict with image data or error
+    """
+    if not PIXAZO_API_KEY:
+        return {"error": "PIXAZO_API_KEY not set. Set environment variable or provide API key."}
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Request image generation
+            response = await client.post(
+                f"{PIXAZO_API_URL}/v1/generate",
+                headers={
+                    "Authorization": f"Bearer {PIXAZO_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "prompt": prompt,
+                    "width": size[0],
+                    "height": size[1],
+                    "style": style,
+                    "negative_prompt": "blurry, low quality, distorted, deformed",
+                }
+            )
+
+            if response.status_code != 200:
+                return {"error": f"Image generation failed: {response.status_code} - {response.text[:200]}"}
+
+            result = response.json()
+
+            # Get the generated image URL
+            if "image_url" in result:
+                image_url = result["image_url"]
+            elif "data" in result and len(result["data"]) > 0:
+                image_url = result["data"][0].get("url") or result["data"][0].get("b64_json")
+            else:
+                return {"error": f"Unexpected response format: {result}"}
+
+            # Download the image
+            if image_url.startswith("http"):
+                img_response = await client.get(image_url)
+                if img_response.status_code != 200:
+                    return {"error": f"Failed to download generated image"}
+                image_data = img_response.content
+            elif image_url.startswith("data:"):
+                # Base64 data URL
+                image_data = base64.b64decode(image_url.split(",", 1)[1])
+            else:
+                # Assume it's raw base64
+                image_data = base64.b64decode(image_url)
+
+            # Save to file if path provided
+            if output_path:
+                output_file = Path(output_path)
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_file, "wb") as f:
+                    f.write(image_data)
+                return {
+                    "success": True,
+                    "image_path": str(output_file),
+                    "size": size,
+                    "prompt": prompt,
+                }
+
+            # Return image data directly
+            return {
+                "success": True,
+                "image_data": image_data,
+                "size": size,
+                "prompt": prompt,
+            }
+
+    except httpx.ConnectError:
+        return {"error": f"Cannot connect to Pixazo API at {PIXAZO_API_URL}"}
+    except httpx.TimeoutException:
+        return {"error": "Image generation timed out"}
     except Exception as e:
+        return {"error": f"Image generation failed: {str(e)}"}
+
+
+async def ai_image_to_3d_blender(
+    prompt: str,
+    output_dir: Optional[str] = None,
+    image_style: str = "3d_render",
+    image_size: list = [512, 512],
+    import_to_blender: bool = True,
+    texture: bool = True,
+    remove_background: bool = True,
+    octree_resolution: int = 256,
+) -> dict:
+    """
+    Complete workflow: Generate AI image, convert to 3D, and import to Blender.
+
+    This tool:
+    1. Generates an AI image using Pixazo
+    2. Converts the image to 3D using Hunyuan3D
+    3. Saves the GLB file to disk
+    4. Optionally imports to Blender via MCP
+
+    Args:
+        prompt: Text description for both image and 3D model
+        output_dir: Directory to save files (default: ./output/3d)
+        image_style: Style for AI image (3d_render, realistic, cartoon, low_poly)
+        image_size: [width, height] for generated image
+        import_to_blender: Whether to import directly to Blender
+        texture: Whether to generate 3D with texture
+        remove_background: Whether to remove background before 3D conversion
+        octree_resolution: Quality of 3D generation (128-512)
+
+    Returns:
+        dict with status, file paths, and Blender import status
+    """
+    # Determine output directory
+    if output_dir:
+        out_dir = Path(output_dir)
+    else:
+        out_dir = Path.cwd() / "output" / "3d"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create safe filename from prompt
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in prompt[:30])
+    safe_name = safe_name.strip().replace(" ", "_")
+
+    # Step 1: Generate AI image
+    image_path = out_dir / f"{safe_name}_reference.png"
+
+    image_result = await generate_ai_image(
+        prompt=prompt,
+        size=image_size,
+        style=image_style,
+        output_path=str(image_path),
+    )
+
+    if not image_result.get("success"):
         return {
-            "running": False,
-            "url": HUNYUAN_API_URL,
-            "message": f"Error checking server: {str(e)}"
+            "error": f"AI image generation failed: {image_result.get('error')}",
+            "step": "image_generation"
         }
+
+    result = {
+        "success": True,
+        "prompt": prompt,
+        "image_path": str(image_path),
+        "image_style": image_style,
+        "step": "image_generated",
+        "glb_path": None,
+        "blender_import": None,
+    }
+
+    # Step 2: Convert image to 3D
+    gen_result = await hunyuan_generate_glb(
+        image_path=str(image_path),
+        remove_background=remove_background,
+        texture=texture,
+        octree_resolution=octree_resolution,
+    )
+
+    if not gen_result.get("success"):
+        result["error"] = f"3D generation failed: {gen_result.get('error')}"
+        result["step"] = "3d_generation"
+        return result
+
+    # Save the GLB file
+    glb_path = out_dir / f"{safe_name}.glb"
+    with open(glb_path, "wb") as f:
+        f.write(gen_result["glb_data"])
+
+    result["glb_path"] = str(glb_path)
+    result["file_size_kb"] = gen_result["file_size_kb"]
+    result["textured"] = gen_result["textured"]
+    result["step"] = "3d_generated"
+    result["message"] = f"Generated 3D model from AI image: {safe_name}.glb"
+
+    # Step 3: Import to Blender if requested
+    if import_to_blender:
+        if check_blender_mcp():
+            import_result = await send_to_blender_mcp({
+                "type": "execute_code",
+                "params": {
+                    "code": f'''
+import bpy
+bpy.ops.import_scene.gltf(filepath=r"{str(glb_path)}")
+imported = bpy.context.selected_objects
+if imported:
+    imported[0].name = "{safe_name}"
+{{"imported": len(imported), "objects": [o.name for o in imported]}}
+'''
+                }
+            })
+            result["blender_import"] = import_result
+            result["step"] = "complete"
+        else:
+            result["blender_import"] = {
+                "status": "skipped",
+                "reason": "Blender MCP not running. Start Blender with MCP addon to enable auto-import."
+            }
+            result["step"] = "complete_no_blender"
+
+    return result
 
 
 def register_blender_workflow_tools(registry: ToolRegistry) -> None:
@@ -501,5 +715,98 @@ def register_blender_workflow_tools(registry: ToolRegistry) -> None:
             "required": []
         },
         function=hunyuan_status,
+        category="blender_workflow",
+    ))
+
+    registry.register(ToolDefinition(
+        name="ai_image_to_3d_blender",
+        description="Complete workflow: Generate AI image from text, convert to 3D model, and import to Blender. "
+                   "Combines AI image generation with 3D conversion for a seamless text-to-3D pipeline.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Text description for both AI image generation and 3D model"
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Directory to save generated files (default: ./output/3d)"
+                },
+                "image_style": {
+                    "type": "string",
+                    "description": "Style for AI image generation",
+                    "enum": ["3d_render", "realistic", "cartoon", "low_poly", "anime", "pixel_art"],
+                    "default": "3d_render"
+                },
+                "image_size": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "[width, height] for generated image",
+                    "default": [512, 512]
+                },
+                "import_to_blender": {
+                    "type": "boolean",
+                    "description": "Whether to import directly to Blender via MCP",
+                    "default": True
+                },
+                "texture": {
+                    "type": "boolean",
+                    "description": "Whether to generate 3D with texture",
+                    "default": True
+                },
+                "remove_background": {
+                    "type": "boolean",
+                    "description": "Whether to remove background before 3D conversion",
+                    "default": True
+                },
+                "octree_resolution": {
+                    "type": "integer",
+                    "description": "Quality of 3D generation (128-512)",
+                    "default": 256
+                }
+            },
+            "required": ["prompt"]
+        },
+        function=ai_image_to_3d_blender,
+        category="blender_workflow",
+        examples=[
+            'ai_image_to_3d_blender(prompt="A cute robot character with round eyes")',
+            'ai_image_to_3d_blender(prompt="A medieval sword", image_style="realistic", texture=True)',
+            'ai_image_to_3d_blender(prompt="Low poly tree", image_style="low_poly", octree_resolution=128)'
+        ]
+    ))
+
+    registry.register(ToolDefinition(
+        name="generate_ai_image",
+        description="Generate an AI image using Pixazo API. "
+                   "Can be used standalone or as part of a larger workflow.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Text description of the image to generate"
+                },
+                "size": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "[width, height] for the image",
+                    "default": [512, 512]
+                },
+                "style": {
+                    "type": "string",
+                    "description": "Style preset for generation",
+                    "enum": ["3d_render", "realistic", "cartoon", "low_poly", "anime", "pixel_art"],
+                    "default": "3d_render"
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Optional path to save the image"
+                }
+            },
+            "required": ["prompt"]
+        },
+        function=generate_ai_image,
         category="blender_workflow",
     ))
