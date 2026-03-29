@@ -121,4 +121,10 @@ def get_tool_registry() -> ToolRegistry:
         # Register game library tools
         from llm_router.tools.game_library import register_game_library_tools
         register_game_library_tools(_global_registry)
+        # Register Hunyuan3D tools for 3D asset generation
+        from llm_router.tools.godot_hunyuan import register_godot_hunyuan_tools
+        register_godot_hunyuan_tools(_global_registry)
+        # Register Blender workflow tools
+        from llm_router.tools.blender_workflow import register_blender_workflow_tools
+        register_blender_workflow_tools(_global_registry)
     return _global_registry
