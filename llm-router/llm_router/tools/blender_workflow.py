@@ -395,8 +395,8 @@ async def hunyuan_status() -> dict:
 
 
 # AI Image Generation Configuration
-PIXAZO_API_URL = os.environ.get("PIXAZO_API_URL", "https://api.pixazo.ai")
-PIXAZO_API_KEY = os.environ.get("PIXAZO_API_KEY", "")
+PIXAZO_API_KEY = os.environ.get("PIXAZO_API_KEY", "b07f2a4ffe134506af0d30a56892eb6b")
+PIXAZO_FLUX_URL = "https://gateway.pixazo.ai/flux-1-schnell/v1/getData"
 
 
 async def generate_ai_image(
@@ -406,7 +406,7 @@ async def generate_ai_image(
     output_path: Optional[str] = None,
 ) -> dict:
     """
-    Generate an AI image using Pixazo API.
+    Generate an AI image using Pixazo API (FLUX Schnell).
 
     Args:
         prompt: Text description of the image
@@ -420,22 +420,37 @@ async def generate_ai_image(
     if not PIXAZO_API_KEY:
         return {"error": "PIXAZO_API_KEY not set. Set environment variable or provide API key."}
 
+    # Build style-enhanced prompt
+    style_prompts = {
+        "3d_render": "3D rendered image, high quality, clean lighting, white background",
+        "realistic": "photorealistic, highly detailed, professional photography",
+        "cartoon": "cartoon style, vibrant colors, clean lines",
+        "low_poly": "low poly 3D model, simple geometric shapes, clean white background",
+        "anime": "anime style, detailed illustration, vibrant colors",
+        "pixel_art": "pixel art style, retro game aesthetic, clean sprite",
+    }
+
+    style_suffix = style_prompts.get(style, style_prompts.get("3d_render", ""))
+    enhanced_prompt = f"{prompt}, {style_suffix}"
+
+    payload = {
+        "prompt": enhanced_prompt,
+        "num_steps": 4,
+        "seed": 42,
+        "height": size[1],
+        "width": size[0]
+    }
+
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            # Request image generation
+            # Request image generation using FLUX
             response = await client.post(
-                f"{PIXAZO_API_URL}/v1/generate",
+                PIXAZO_FLUX_URL,
                 headers={
-                    "Authorization": f"Bearer {PIXAZO_API_KEY}",
                     "Content-Type": "application/json",
+                    "Ocp-Apim-Subscription-Key": PIXAZO_API_KEY
                 },
-                json={
-                    "prompt": prompt,
-                    "width": size[0],
-                    "height": size[1],
-                    "style": style,
-                    "negative_prompt": "blurry, low quality, distorted, deformed",
-                }
+                json=payload
             )
 
             if response.status_code != 200:
@@ -443,26 +458,17 @@ async def generate_ai_image(
 
             result = response.json()
 
-            # Get the generated image URL
-            if "image_url" in result:
-                image_url = result["image_url"]
-            elif "data" in result and len(result["data"]) > 0:
-                image_url = result["data"][0].get("url") or result["data"][0].get("b64_json")
-            else:
-                return {"error": f"Unexpected response format: {result}"}
+            # Get the generated image URL from FLUX response
+            image_url = result.get("output")
+            if not image_url:
+                return {"error": f"No image URL in response: {result}"}
 
             # Download the image
-            if image_url.startswith("http"):
-                img_response = await client.get(image_url)
-                if img_response.status_code != 200:
-                    return {"error": f"Failed to download generated image"}
-                image_data = img_response.content
-            elif image_url.startswith("data:"):
-                # Base64 data URL
-                image_data = base64.b64decode(image_url.split(",", 1)[1])
-            else:
-                # Assume it's raw base64
-                image_data = base64.b64decode(image_url)
+            img_response = await client.get(image_url)
+            if img_response.status_code != 200:
+                return {"error": f"Failed to download generated image"}
+
+            image_data = img_response.content
 
             # Save to file if path provided
             if output_path:
@@ -475,6 +481,7 @@ async def generate_ai_image(
                     "image_path": str(output_file),
                     "size": size,
                     "prompt": prompt,
+                    "enhanced_prompt": enhanced_prompt,
                 }
 
             # Return image data directly
@@ -483,10 +490,11 @@ async def generate_ai_image(
                 "image_data": image_data,
                 "size": size,
                 "prompt": prompt,
+                "enhanced_prompt": enhanced_prompt,
             }
 
     except httpx.ConnectError:
-        return {"error": f"Cannot connect to Pixazo API at {PIXAZO_API_URL}"}
+        return {"error": f"Cannot connect to Pixazo API"}
     except httpx.TimeoutException:
         return {"error": "Image generation timed out"}
     except Exception as e:
