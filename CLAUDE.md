@@ -27,6 +27,13 @@ llm-router                                    # Start with GUI at http://localho
 python -m llm_router.server.api               # Alternative entry point
 uvicorn llm_router.server.api:app --reload    # Development mode
 
+# MCP server (for Claude Code integration)
+python -m llm_router.mcp_server               # Start MCP server on stdio
+
+# Game agent
+python -m llm_router.game_agent play --url http://localhost:8888   # Play a game
+python -m llm_router.game_agent learn                              # Learn visual templates
+
 # Testing
 pytest tests/ -v                              # Run all tests
 pytest tests/test_router.py -v                # Run specific test file
@@ -45,20 +52,44 @@ llm_router/
 ├── config.py            # YAML config loading with env var substitution
 ├── models.py            # Pydantic models (OpenAI-compatible)
 ├── parallel.py          # Broadcast, map, race patterns for multi-model execution
-├── agent_framework.py   # Universal agent framework with memory and tool integration
+├── agent_framework.py   # Universal agent framework with agentic tool-calling loop
 ├── orchestrator.py      # DAG/sequential/parallel workflow orchestration
+├── worker_pool.py       # Dynamic worker agents with skill-based task delegation
+├── mcp_server.py        # MCP server (stdio) exposing 40+ tools to Claude Code
+├── mcp_worker.py        # MCP bridge wrapping async worker pool ops for MCP protocol
 ├── telegram_bot.py      # Telegram bot integration for agent control
 ├── providers/
 │   ├── base.py          # Abstract BaseProvider class
 │   ├── openai.py        # OpenAI provider implementation
 │   ├── anthropic.py     # Anthropic provider implementation
-│   └── openai_compatible.py  # Generic OpenAI-compatible (OpenRouter, etc.)
+│   └── openai_compatible.py  # Generic OpenAI-compatible (OpenRouter, NVIDIA, etc.)
 ├── server/
 │   ├── api.py           # FastAPI server with all endpoints
-│   └── static/index.html # Unified web dashboard
+│   └── static/          # Web dashboard and game gallery UI
 ├── tools/
-│   ├── __init__.py      # Tool registry
-│   └── builtin.py       # Built-in tools (web_search, file_ops, code_exec, api_call)
+│   ├── __init__.py      # ToolRegistry singleton with auto-registration
+│   ├── builtin.py       # Built-in tools (web_search, file_ops, code_exec, api_call)
+│   ├── godot_tools.py   # Godot project/scene/script creation and web export
+│   ├── godot_assets.py  # Kenney.nl asset browser, sprite/sound generation
+│   ├── godot_debug.py   # Project validation and scene debugging
+│   ├── godot_templates.py # Pre-built game templates (pong, platformer, shooter, etc.)
+│   ├── godot_hunyuan.py # Hunyuan3D integration for 3D asset generation
+│   ├── ai_art.py        # AI-generated sprites and textures
+│   ├── itchio_tools.py  # Butler CLI for itch.io publishing
+│   ├── blender_workflow.py  # Blender Python API integration
+│   ├── mixamo_workflow.py   # Adobe Mixamo animation tools
+│   ├── godot_screenshot.py  # Visual feedback: screenshot capture and comparison
+│   ├── godot_juice.py       # Game juice effects (camera shake, hit flash, squash/stretch)
+│   ├── godot_difficulty.py  # Parameterized difficulty curves (linear/exponential/step/sigmoid)
+│   ├── godot_design.py      # Game design prompt templates and design review
+│   └── game_library.py  # Game metadata and library management
+├── game_agent/          # Autonomous game-playing agent
+│   ├── browser.py       # Browser automation via Playwright
+│   ├── player.py        # Game player logic
+│   ├── cli.py           # CLI: play, learn, detect commands
+│   ├── vision/          # Fast visual template matching
+│   ├── decision/        # Rules engine and state machine
+│   └── improvement/     # Q-learning with replay buffer
 └── agent_builder/       # Pi agent component generators
     ├── skills.py        # SKILL.md generator with templates
     ├── extensions.py    # TypeScript extension generator
@@ -122,6 +153,14 @@ result = await registry.execute(workflow.id, "What is quantum computing?")
 | `code_exec` | Execute code (Python, JS, Bash) | execution |
 | `api_call` | Make HTTP requests | network |
 | `db_query` | Execute SQL queries | database |
+
+#### Game Development Tools
+
+Registered as Godot tools via `tools/godot_tools.py`. The MCP server exposes 40+ tools including project creation, scene building, script generation, web export, asset management, AI art generation, and itch.io publishing.
+
+#### Worker Pool and MCP Integration
+
+Workers are persistent agents with specialized skills, stored in `./data/workers/workers.json`. The MCP server (`mcp_server.py`) bridges Claude Code to the router by exposing tools like `delegate_task`, `analyze_task`, `spawn_worker`, `execute_skill`, `list_workers`, and `list_skills`. MCP workers wrap async operations with sync functions for stdio protocol compatibility.
 
 ### API Endpoints
 
@@ -196,6 +235,16 @@ result = await registry.execute(workflow.id, "What is quantum computing?")
 - **Parallel Execution**: `ParallelExecutor` class provides `broadcast()`, `map()`, `race()` methods
 - **Agent Memory**: Persistent conversation memory with configurable max messages
 - **Workflow DAG**: Topological sort ensures dependencies are respected
+- **Tool Registry**: Singleton `ToolRegistry` auto-registers all tool modules on init; tools expose OpenAI-compatible definitions
+- **Worker Pool**: Dynamic worker spawning with skill-based task delegation; workers persist to disk across restarts
+- **MCP Protocol**: `mcp_server.py` is a stdio-based JSON-RPC server; `mcp_worker.py` bridges async worker pool ops to sync MCP handlers
+
+### Games Directory
+
+`llm-router/games/` contains multiple Godot game projects created with the tool system:
+- `MyPlatformer/` - 2D platformer with Claude Chat editor plugin in `addons/claude_chat/`
+- `SpaceInvaders/`, `SpaceShooter/`, `ZeldaGameBoy/`, `slothitude-pong/`, `dungeon-crawler-jam-2026/`, `sloth-forest/`
+- Each game is a self-contained Godot 4.6 project
 
 ---
 

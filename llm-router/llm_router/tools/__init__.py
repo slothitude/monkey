@@ -127,4 +127,19 @@ def get_tool_registry() -> ToolRegistry:
         # Register Blender workflow tools
         from llm_router.tools.blender_workflow import register_blender_workflow_tools
         register_blender_workflow_tools(_global_registry)
+        # Register Mixamo workflow tools
+        from llm_router.tools.mixamo_workflow import register_mixamo_workflow_tools
+        register_mixamo_workflow_tools(_global_registry)
+        # Register screenshot/visual feedback tools
+        from llm_router.tools.godot_screenshot import register_godot_screenshot_tools
+        register_godot_screenshot_tools(_global_registry)
+        # Register juice effect tools
+        from llm_router.tools.godot_juice import register_godot_juice_tools
+        register_godot_juice_tools(_global_registry)
+        # Register difficulty curve tools
+        from llm_router.tools.godot_difficulty import register_godot_difficulty_tools
+        register_godot_difficulty_tools(_global_registry)
+        # Register game design tools
+        from llm_router.tools.godot_design import register_godot_design_tools
+        register_godot_design_tools(_global_registry)
     return _global_registry
